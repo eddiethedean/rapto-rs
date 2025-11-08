@@ -29,4 +29,5 @@ bindings = "pyo3"
 features = ["pyo3/extension-module"]
 module-name = "raptors._raptors"
 profile = "release"
+python-source = "python"
 
