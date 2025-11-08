@@ -1,0 +1,24 @@
+[package]
+name = "raptors"
+version = "0.0.1"
+edition = "2021"
+authors = ["Odos Matthews <odosmatthews@gmail.com>"]
+license = "MIT"
+description = "Rust core crate for the Raptors array library."
+repository = "https://github.com/eddiethedean/raptors"
+
+[lib]
+name = "raptors"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.21", features = ["extension-module"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+[package.metadata.maturin]
+name = "raptors._raptors"
+

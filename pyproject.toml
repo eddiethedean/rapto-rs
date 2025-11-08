@@ -1,0 +1,32 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "raptors"
+version = "0.0.1"
+description = "Rust-powered, NumPy-compatible array library scaffold."
+authors = [{ name = "Odos Matthews", email = "odosmatthews@gmail.com" }]
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/eddiethedean/raptors"
+Source = "https://github.com/eddiethedean/raptors"
+"Issue Tracker" = "https://github.com/eddiethedean/raptors/issues"
+
+[tool.maturin]
+bindings = "pyo3"
+features = ["pyo3/extension-module"]
+module-name = "raptors._raptors"
+profile = "release"
+
