@@ -20,7 +20,7 @@ __all__ = [
     "__github__",
 ]
 
-__version__ = getattr(_core, "__version__", "0.0.1")
+__version__ = getattr(_core, "__version__", "0.0.2")
 __author__ = getattr(_core, "__author__", "Odos Matthews <odosmatthews@gmail.com>")
 __github__ = getattr(_core, "__github__", "https://github.com/eddiethedean")
 

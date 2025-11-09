@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "raptors"
-version = "0.0.1"
+version = "0.0.2"
 description = "Rust-powered, NumPy-compatible array library scaffold."
 authors = [{ name = "Odos Matthews", email = "odosmatthews@gmail.com" }]
 readme = "README.md"
