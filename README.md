@@ -2,6 +2,8 @@
 
 Rust-powered, NumPy-compatible Python array library scaffolding.
 
+> **Current release:** `0.0.2`
+
 ## Getting Started
 
 This repository contains the initial skeleton for `raptors`, a Rust-backed
@@ -20,6 +22,16 @@ Matthews (`odosmatthews@gmail.com`, GitHub: `eddiethedean`).
 Consult `docs/overview.md` for an expanded project overview and links to the
 full plan.
 
+### Installation (local development)
+
+```bash
+# Build and install the Rust extension into your active virtualenv.
+maturin develop
+
+# Or build a release wheel.
+maturin build --release
+```
+
 ## Quickstart
 
 ```python
@@ -34,7 +46,7 @@ c = a.add(b).scale(2.0)
 total = c.sum()
 average = c.mean()
 
-# Interoperate with NumPy (requires numpy) without copying data.
+# Interoperate with NumPy (requires numpy).
 import numpy as np
 
 numpy_view = raptors.to_numpy(c)
@@ -43,7 +55,8 @@ assert np.allclose(numpy_view, [4.0, 6.0, 8.0])
 
 ## Continuous Integration
 
-An example GitHub Actions workflow is provided in `ci/github-actions.yml`. It
-builds the Rust extension with `maturin`, installs the Python package in
-development mode, and runs both `pytest` and `cargo test`.
+The `.github/workflows/build-wheels.yml` workflow builds and tests wheels across
+Ubuntu, macOS, and Windows for Python 3.9–3.12 using `maturin`. Successful runs
+upload ready-to-use wheel artifacts and exercise the Python bindings via
+`pytest`.
 
