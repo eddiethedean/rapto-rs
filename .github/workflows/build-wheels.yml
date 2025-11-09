@@ -52,7 +52,7 @@ jobs:
           python -m venv .env-test
           source .env-test/bin/activate
           python -m pip install --upgrade pip
-          pip install numpy pytest
+          pip install "numpy<2" pytest
           pip install dist/raptors-*.whl
           python -c "import raptors; print('raptors', raptors.__version__); raptors.array([1.0, 2.0, 3.0])"
         shell: bash
@@ -63,7 +63,7 @@ jobs:
         run: |
           python -m venv env-test
           .\env-test\Scripts\python -m pip install --upgrade pip
-          .\env-test\Scripts\pip install numpy pytest
+          .\env-test\Scripts\pip install "numpy<2" pytest
           .\env-test\Scripts\pip install dist\raptors-*.whl
           .\env-test\Scripts\python -c "import raptors; print('raptors', raptors.__version__); raptors.array([1.0, 2.0, 3.0])"
 
