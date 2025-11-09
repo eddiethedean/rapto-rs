@@ -43,3 +43,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install maturin
 
+      - name: Build wheel
+        run: maturin build --out dist --strip --release
+
