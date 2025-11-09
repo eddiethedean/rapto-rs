@@ -52,8 +52,8 @@ jobs:
           python -m venv .env-test
           source .env-test/bin/activate
           python -m pip install --upgrade pip
-          pip install "numpy<1.25" pytest
-          pip install dist/raptors-*.whl
+          python -m pip install "numpy<2" pytest
+          python -c "import pathlib, subprocess, sys; wheel = next(pathlib.Path('dist').glob('raptors-*.whl')); subprocess.check_call([sys.executable, '-m', 'pip', 'install', str(wheel)])"
           python -c "import raptors; print('raptors', raptors.__version__); raptors.array([1.0, 2.0, 3.0])"
         shell: bash
 
@@ -63,8 +63,8 @@ jobs:
         run: |
           python -m venv env-test
           .\env-test\Scripts\python -m pip install --upgrade pip
-          .\env-test\Scripts\pip install "numpy<1.25" pytest
-          .\env-test\Scripts\pip install dist\raptors-*.whl
+          .\env-test\Scripts\python -m pip install "numpy<2" pytest
+          .\env-test\Scripts\python -c "import pathlib, subprocess, sys; wheel = next(pathlib.Path('dist').glob('raptors-*.whl')); subprocess.check_call([sys.executable, '-m', 'pip', 'install', str(wheel)])"
           .\env-test\Scripts\python -c "import raptors; print('raptors', raptors.__version__); raptors.array([1.0, 2.0, 3.0])"
 
       - name: Upload wheel artifact
