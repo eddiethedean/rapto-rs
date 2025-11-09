@@ -46,3 +46,32 @@ jobs:
       - name: Build wheel
         run: maturin build --out dist --strip --release
 
+      - name: Install built wheel
+        if: matrix.os != 'windows-latest'
+        run: |
+          python -m venv .env-test
+          source .env-test/bin/activate
+          python -m pip install --upgrade pip
+          pip install numpy pytest
+          pip install dist/raptors-*.whl
+          python -c "import raptors; print('raptors', raptors.__version__); raptors.array([1.0, 2.0, 3.0])"
+        shell: bash
+
+      - name: Install built wheel (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          python -m venv env-test
+          .\env-test\Scripts\python -m pip install --upgrade pip
+          .\env-test\Scripts\pip install numpy pytest
+          .\env-test\Scripts\pip install dist\raptors-*.whl
+          .\env-test\Scripts\python -c "import raptors; print('raptors', raptors.__version__); raptors.array([1.0, 2.0, 3.0])"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: raptors-wheel-${{ matrix.os }}-py${{ matrix.python }}
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 30
+
