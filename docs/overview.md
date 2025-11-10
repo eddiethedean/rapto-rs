@@ -9,15 +9,16 @@ familiar Python interface.
 
 - Repository skeleton established with Rust, Python, tests, benches, CI, and
   documentation directories.
-- Rust crate now exports a `RustArray` type with constructors (`array`, `zeros`,
-  `ones`), arithmetic (`add`, `scale`), and reductions (`sum`, `mean`), plus
-  NumPy interop helpers.
-- Python package re-exports the Rust array type, wraps helpers with Pythonic
-  signatures, and offers `to_numpy`/`from_numpy` conversions.
-- Test suite covers array construction, helpers, arithmetic, reductions, and
-  roundtrips against NumPy when available.
-- CI workflow template (`ci/github-actions.yml`) demonstrates building the
-  extension using `maturin` and running `pytest`/`cargo test`.
+- Rust crate now exports a `RustArray` storing flattened data with explicit
+  shape metadata, constructors that accept 1-D or 2-D inputs, elementwise
+  arithmetic, and reductions supporting axis-aware operations.
+- Python package re-exports the Rust type, adds helpers (`array2d`, generalized
+  `zeros`/`ones`), and handles roundtrip conversions with NumPy using the new
+  dynamic bindings.
+- Test suite covers 1-D and 2-D construction, helpers, arithmetic, axis
+  reductions, and roundtrips against NumPy when available.
+- CI workflow template (`.github/workflows/build-wheels.yml`) builds platform
+  wheels via `maturin`, runs the Python tests, and uploads release artifacts.
 
 ## Next Steps
 

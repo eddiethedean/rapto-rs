@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Sequence, Union
 
 from . import _raptors as _core
 
 RustArray = _core.RustArray
+ShapeLike = Union[int, Sequence[int]]
 
 __all__ = [
     "RustArray",
     "array",
+    "array2d",
     "zeros",
     "ones",
+    "broadcast_add",
     "from_numpy",
     "to_numpy",
     "__version__",
@@ -30,23 +33,33 @@ def array(values: Iterable[float]) -> RustArray:
     return _core.array(values)
 
 
-def zeros(length: int) -> RustArray:
-    """Return an array filled with zeros of the requested length."""
-    return _core.zeros(length)
+def array2d(rows: Iterable[Iterable[float]]) -> RustArray:
+    """Construct a 2-D Raptors array from a nested iterable of numeric values."""
+    return _core.array(rows)
 
 
-def ones(length: int) -> RustArray:
-    """Return an array filled with ones of the requested length."""
-    return _core.ones(length)
+def zeros(shape: ShapeLike) -> RustArray:
+    """Return an array of the requested shape filled with zeros."""
+    return _core.zeros(shape)
+
+
+def ones(shape: ShapeLike) -> RustArray:
+    """Return an array of the requested shape filled with ones."""
+    return _core.ones(shape)
+
+
+def broadcast_add(lhs: RustArray, rhs: RustArray) -> RustArray:
+    """Return elementwise sum with NumPy-style broadcasting rules."""
+    return lhs.add(rhs)
 
 
 def from_numpy(ndarray) -> RustArray:
-    """Create a Raptors array by copying data from a 1-D NumPy array."""
+    """Create a Raptors array by copying data from a NumPy array."""
     return _core.from_numpy(ndarray)
 
 
 def to_numpy(array: RustArray):
-    """Convert a Raptors array into a NumPy array view."""
+    """Convert a Raptors array into a NumPy array."""
     try:
         import numpy as _np  # type: ignore[import-not-found]
     except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
@@ -54,5 +67,5 @@ def to_numpy(array: RustArray):
             "NumPy is required to convert Raptors arrays back to NumPy."
         ) from exc
 
-    return _np.asarray(array.to_list(), dtype=_np.float64)
+    return _np.asarray(array.to_numpy(), dtype=_np.float64)
 

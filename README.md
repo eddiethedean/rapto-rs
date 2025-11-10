@@ -37,20 +37,24 @@ maturin build --release
 ```python
 import raptors
 
-# Construct arrays from Python iterables or helper constructors.
-a = raptors.array([1.0, 2.0, 3.0])
-b = raptors.ones(3)
+# Construct 1-D and 2-D arrays from Python iterables or helper constructors.
+row = raptors.array([1.0, 2.0, 3.0])
+matrix = raptors.array2d([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+zeros = raptors.zeros((2, 3))
+ones = raptors.ones(3)
 
-# Run elementwise math and reductions.
-c = a.add(b).scale(2.0)
-total = c.sum()
-average = c.mean()
+# Run elementwise math and reductions across dimensions.
+scaled = matrix.add(raptors.array2d([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]])).scale(0.5)
+total = scaled.sum()
+col_sums = scaled.sum_axis(0)
+row_means = scaled.mean_axis(1)
 
-# Interoperate with NumPy (requires numpy).
+# Interoperate with NumPy (requires numpy) without leaving Python.
 import numpy as np
 
-numpy_view = raptors.to_numpy(c)
-assert np.allclose(numpy_view, [4.0, 6.0, 8.0])
+numpy_view = raptors.to_numpy(matrix)
+assert numpy_view.shape == (2, 3)
+assert np.allclose(numpy_view, [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
 ```
 
 ## Continuous Integration
