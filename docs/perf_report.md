@@ -49,14 +49,22 @@ python scripts/compare_numpy_raptors.py --suite 2d --simd-mode disable \
   --validate-json benchmarks/baselines/2d_float32_scalar.json --validate-slack 0.05
 ```
 
+### Targeted Harnesses
+
+- **Axis-0 float32 reducers**:  
+  `RAPTORS_THREADS=8 python benchmarks/run_axis0_suite.py --simd-mode force --output-json benchmarks/results/axis0_latest.json`  
+  The harness mirrors CI shapes (512²/1024²/2048²) and is the fastest way to compare new column kernels or chunking tweaks before re-enabling parallel execution.
+- **Broadcast add spot checks**: reuse `scripts/compare_numpy_raptors.py` with `--operations broadcast_add` and pass `--output-json` so telemetry is persisted for CI.
+- All persisted JSON artefacts are linted in CI via `python scripts/validate_benchmark_results.py`, ensuring the recorded shapes/dtypes/metrics stay well-formed.
+
 ## Adaptive Threading Controls
 
 - `RAPTORS_SIMD=0|1` — force scalar/SIMD execution.
 - `RAPTORS_THREADS=<n>` — pin Rayon pool size.
 - `raptors.threading_info()` — Python helper returning live heuristics:
   - Baseline cutovers per dtype.
-  - Adaptive median throughput samples (elements/ms).
-  - Last operation metadata (tiles processed, partial buffer width, elapsed time).
+  - Adaptive median throughput samples (elements/ms) for global reducers *and* per-operation telemetry covering `scale`, broadcast row/column variants, and axis reducers.
+  - Last operation metadata (tiles processed, partial buffer width, elapsed time); useful when comparing harness runs locally.
 
 ## Hardware Notes
 

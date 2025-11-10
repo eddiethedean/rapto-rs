@@ -916,6 +916,7 @@ mod neon {
     const LANES_F32: usize = 4;
     const MAX_ACCUMULATORS_F64: usize = 4;
     const MAX_ACCUMULATORS_F32: usize = 8;
+    const PREFETCH_DISTANCE_F32: usize = LANES_F32 * 16;
 
     #[target_feature(enable = "neon")]
     pub unsafe fn reduce_sum_f64(input: &[f64], accumulators: usize) -> f64 {
@@ -1116,6 +1117,34 @@ mod neon {
         let factor_v = vdupq_n_f32(factor);
 
         let mut i = 0usize;
+        let unroll = LANES_F32 * 4;
+        while i + unroll <= len {
+            let base = ptr_in.add(i);
+            #[cfg(target_arch = "aarch64")]
+            {
+                if i + PREFETCH_DISTANCE_F32 < len {
+                    core::arch::asm!(
+                        "prfm pldl1keep, [{addr}]",
+                        addr = in(reg) base.add(PREFETCH_DISTANCE_F32),
+                        options(readonly, nostack)
+                    );
+                }
+            }
+            let a0 = vld1q_f32(base);
+            let a1 = vld1q_f32(base.add(LANES_F32));
+            let a2 = vld1q_f32(base.add(LANES_F32 * 2));
+            let a3 = vld1q_f32(base.add(LANES_F32 * 3));
+            let c0 = vmulq_f32(a0, factor_v);
+            let c1 = vmulq_f32(a1, factor_v);
+            let c2 = vmulq_f32(a2, factor_v);
+            let c3 = vmulq_f32(a3, factor_v);
+            let out_base = ptr_out.add(i);
+            vst1q_f32(out_base, c0);
+            vst1q_f32(out_base.add(LANES_F32), c1);
+            vst1q_f32(out_base.add(LANES_F32 * 2), c2);
+            vst1q_f32(out_base.add(LANES_F32 * 3), c3);
+            i += unroll;
+        }
         while i + LANES_F32 <= len {
             let a = vld1q_f32(ptr_in.add(i));
             let c = vmulq_f32(a, factor_v);

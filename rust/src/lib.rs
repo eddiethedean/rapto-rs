@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, VecDeque},
     convert::TryInto,
     env,
+    hash::Hash,
     ops::Add,
     slice,
     sync::{Mutex, OnceLock},
@@ -111,11 +112,32 @@ const BROADCAST_PAR_MIN_ROWS: usize = 48;
 const BROADCAST_PAR_MIN_COLS: usize = 64;
 const COLUMN_BROADCAST_DIRECT_MAX_ELEMS: usize = 1 << 19;
 const SCALE_PAR_MIN_ELEMS: usize = 1 << 21;
+const OPERATION_SCALE: &str = "scale";
+const OPERATION_BROADCAST_ROW: &str = "broadcast_row";
+const OPERATION_BROADCAST_COL: &str = "broadcast_col";
+const SMALL_AXIS_FAST_COLS: usize = 64;
+const SMALL_AXIS_FAST_ROWS: usize = 128;
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+enum AxisKind {
+    Axis0,
+    Axis1,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+enum BroadcastKind {
+    Row,
+    Column,
+}
 
 #[derive(Default)]
 struct AdaptiveThreadingState {
     throughput: HashMap<&'static str, VecDeque<f64>>,
     seq_throughput: HashMap<&'static str, VecDeque<f64>>,
+    axis_parallel: HashMap<(AxisKind, &'static str), VecDeque<f64>>,
+    axis_sequential: HashMap<(AxisKind, &'static str), VecDeque<f64>>,
+    op_parallel: HashMap<(&'static str, &'static str), VecDeque<f64>>,
+    op_sequential: HashMap<(&'static str, &'static str), VecDeque<f64>>,
     last_event: Option<ThreadingEvent>,
 }
 
@@ -159,23 +181,73 @@ impl AdaptiveThreadingState {
         if event.duration_ms > 0.0 && event.elements > 0 {
             let throughput = event.elements as f64 / event.duration_ms;
             if throughput.is_finite() && throughput > 0.0 {
-                let map = if event.parallel {
-                    &mut self.throughput
+                if event.parallel {
+                    Self::push_sample(&mut self.throughput, event.dtype, throughput);
+                    if !event.operation.is_empty() {
+                        Self::push_sample(
+                            &mut self.op_parallel,
+                            (event.operation, event.dtype),
+                            throughput,
+                        );
+                    }
                 } else {
-                    &mut self.seq_throughput
-                };
-                let deque = map.entry(event.dtype).or_default();
-                if deque.len() == ADAPTIVE_SAMPLE_WINDOW {
-                    deque.pop_front();
+                    Self::push_sample(&mut self.seq_throughput, event.dtype, throughput);
+                    if !event.operation.is_empty() {
+                        Self::push_sample(
+                            &mut self.op_sequential,
+                            (event.operation, event.dtype),
+                            throughput,
+                        );
+                    }
                 }
-                deque.push_back(throughput);
             }
         }
         self.last_event = Some(event);
     }
 
-    fn median(&self, dtype: &'static str) -> Option<f64> {
-        let values = self.throughput.get(dtype)?;
+    fn record_axis(
+        &mut self,
+        axis: AxisKind,
+        dtype: &'static str,
+        elements: usize,
+        duration_ms: f64,
+        parallel: bool,
+    ) {
+        if duration_ms <= 0.0 || elements == 0 {
+            return;
+        }
+        let throughput = elements as f64 / duration_ms;
+        if !throughput.is_finite() || throughput <= 0.0 {
+            return;
+        }
+        let key = (axis, dtype);
+        if parallel {
+            Self::push_sample(&mut self.axis_parallel, key, throughput);
+        } else {
+            Self::push_sample(&mut self.axis_sequential, key, throughput);
+        }
+    }
+
+    fn push_sample<K>(map: &mut HashMap<K, VecDeque<f64>>, key: K, value: f64)
+    where
+        K: Eq + Hash,
+    {
+        let deque = map.entry(key).or_default();
+        if deque.len() == ADAPTIVE_SAMPLE_WINDOW {
+            deque.pop_front();
+        }
+        deque.push_back(value);
+    }
+
+    fn median_from_map<K>(&self, map: &HashMap<K, VecDeque<f64>>, key: K) -> Option<f64>
+    where
+        K: Eq + Hash + Copy,
+    {
+        let values = map.get(&key)?;
+        Self::median_from_deque(values)
+    }
+
+    fn median_from_deque(values: &VecDeque<f64>) -> Option<f64> {
         if values.is_empty() {
             return None;
         }
@@ -189,19 +261,60 @@ impl AdaptiveThreadingState {
         }
     }
 
+    fn median(&self, dtype: &'static str) -> Option<f64> {
+        self.median_from_map(&self.throughput, dtype)
+    }
+
     fn median_seq(&self, dtype: &'static str) -> Option<f64> {
-        let values = self.seq_throughput.get(dtype)?;
-        if values.is_empty() {
-            return None;
-        }
-        let mut sorted = values.iter().copied().collect::<Vec<_>>();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-        let mid = sorted.len() / 2;
-        if sorted.len() % 2 == 0 && mid > 0 {
-            Some((sorted[mid - 1] + sorted[mid]) / 2.0)
+        self.median_from_map(&self.seq_throughput, dtype)
+    }
+
+    fn axis_median(&self, axis: AxisKind, dtype: &'static str, parallel: bool) -> Option<f64> {
+        let key = (axis, dtype);
+        if parallel {
+            self.median_from_map(&self.axis_parallel, key)
         } else {
-            Some(sorted[mid])
+            self.median_from_map(&self.axis_sequential, key)
         }
+    }
+
+    fn axis_sample_count(&self, axis: AxisKind, dtype: &'static str, parallel: bool) -> usize {
+        let key = (axis, dtype);
+        let map = if parallel {
+            &self.axis_parallel
+        } else {
+            &self.axis_sequential
+        };
+        map.get(&key).map(VecDeque::len).unwrap_or(0)
+    }
+
+    fn operation_median(
+        &self,
+        operation: &'static str,
+        dtype: &'static str,
+        parallel: bool,
+    ) -> Option<f64> {
+        let key = (operation, dtype);
+        if parallel {
+            self.median_from_map(&self.op_parallel, key)
+        } else {
+            self.median_from_map(&self.op_sequential, key)
+        }
+    }
+
+    fn operation_sample_count(
+        &self,
+        operation: &'static str,
+        dtype: &'static str,
+        parallel: bool,
+    ) -> usize {
+        let key = (operation, dtype);
+        let map = if parallel {
+            &self.op_parallel
+        } else {
+            &self.op_sequential
+        };
+        map.get(&key).map(VecDeque::len).unwrap_or(0)
     }
 
     fn recommend_cutover(&self, dtype: &'static str) -> Option<usize> {
@@ -210,6 +323,27 @@ impl AdaptiveThreadingState {
             return None;
         }
         let seq_median = self.median_seq(dtype).unwrap_or(0.0);
+        let effective_median = if seq_median > 0.0 && seq_median >= median {
+            seq_median
+        } else {
+            median
+        };
+        let target = target_latency_ms(dtype);
+        if target <= 0.0 {
+            return None;
+        }
+        let cutover = (effective_median * target).ceil() as usize;
+        Some(cutover.max(1))
+    }
+
+    fn recommend_cutover_op(&self, operation: &'static str, dtype: &'static str) -> Option<usize> {
+        let median = self.operation_median(operation, dtype, true)?;
+        if median <= 0.0 {
+            return None;
+        }
+        let seq_median = self
+            .operation_median(operation, dtype, false)
+            .unwrap_or(0.0);
         let effective_median = if seq_median > 0.0 && seq_median >= median {
             seq_median
         } else {
@@ -321,21 +455,33 @@ fn record_axis_event(
     cols: usize,
     elapsed: Duration,
     parallel: bool,
-    operation: &'static str,
+    axis: AxisKind,
 ) {
+    if rows == 0 || cols == 0 {
+        return;
+    }
+
+    let elements = rows.saturating_mul(cols);
+    let duration_ms = elapsed.as_secs_f64() * 1_000.0;
+    if duration_ms <= 0.0 {
+        return;
+    }
+
+    if let Ok(mut guard) = adaptive_state().lock() {
+        guard.record_axis(axis, dtype, elements, duration_ms, parallel);
+    }
+
     let outcome = reduce::tiled::ReduceOutcome {
         value: 0.0,
         tiles_processed: rows,
         parallel,
         partial_buffer: cols,
     };
-    record_threading_event(
-        dtype,
-        rows.saturating_mul(cols),
-        elapsed,
-        &outcome,
-        operation,
-    );
+    let operation = match axis {
+        AxisKind::Axis0 => "axis0",
+        AxisKind::Axis1 => "axis1",
+    };
+    record_threading_event(dtype, elements, elapsed, &outcome, operation);
 }
 
 fn record_scale_event(
@@ -367,14 +513,74 @@ fn record_scale_event(
     }
 }
 
+fn broadcast_operation_name(kind: BroadcastKind) -> &'static str {
+    match kind {
+        BroadcastKind::Row => OPERATION_BROADCAST_ROW,
+        BroadcastKind::Column => OPERATION_BROADCAST_COL,
+    }
+}
+
+fn record_broadcast_event(
+    dtype: &'static str,
+    rows: usize,
+    cols: usize,
+    elapsed: Duration,
+    parallel: bool,
+    kind: BroadcastKind,
+) {
+    if rows == 0 || cols == 0 {
+        return;
+    }
+    let elements = rows.saturating_mul(cols);
+    let duration_ms = elapsed.as_secs_f64() * 1_000.0;
+    if duration_ms <= 0.0 {
+        return;
+    }
+    let event = ThreadingEvent {
+        dtype,
+        elements,
+        duration_ms,
+        tiles: rows,
+        partial_buffer: cols,
+        parallel,
+        operation: broadcast_operation_name(kind),
+    };
+    if let Ok(mut guard) = adaptive_state().lock() {
+        guard.record(event);
+    }
+}
+
 fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
     let mut cutover = SCALE_PAR_MIN_ELEMS;
     let mut prefer_parallel = true;
     if let Ok(guard) = adaptive_state().lock() {
-        if let Some(recommended) = guard.recommend_cutover(dtype) {
+        if let Some(recommended) = guard.recommend_cutover_op(OPERATION_SCALE, dtype) {
+            cutover = cutover.max(recommended);
+        } else if let Some(recommended) = guard.recommend_cutover(dtype) {
             cutover = cutover.max(recommended);
         }
-        if let (Some(par_median), Some(seq_median)) = (guard.median(dtype), guard.median_seq(dtype))
+        let par_samples = guard.operation_sample_count(OPERATION_SCALE, dtype, true);
+        let seq_samples = guard.operation_sample_count(OPERATION_SCALE, dtype, false);
+        if seq_samples > 0 && par_samples == 0 {
+            prefer_parallel = false;
+        }
+        if par_samples >= 2 && seq_samples >= 1 {
+            if let (Some(par_median), Some(seq_median)) = (
+                guard.operation_median(OPERATION_SCALE, dtype, true),
+                guard.operation_median(OPERATION_SCALE, dtype, false),
+            ) {
+                if par_median <= seq_median * 1.05 {
+                    prefer_parallel = false;
+                }
+                let target = target_latency_ms(dtype);
+                if target > 0.0 {
+                    let effective = par_median.max(seq_median);
+                    let op_cutover = (effective * target).ceil() as usize;
+                    cutover = cutover.max(op_cutover.max(1));
+                }
+            }
+        } else if let (Some(par_median), Some(seq_median)) =
+            (guard.median(dtype), guard.median_seq(dtype))
         {
             if par_median <= seq_median * 1.05 {
                 prefer_parallel = false;
@@ -440,12 +646,6 @@ fn should_parallelize(rows: usize, cols: usize, dtype: &'static str) -> bool {
     elements >= threshold
 }
 
-#[derive(Clone, Copy)]
-enum AxisKind {
-    Axis0,
-    Axis1,
-}
-
 fn axis_parallel_cutover(axis: AxisKind, dtype: &'static str) -> usize {
     match (axis, dtype) {
         (AxisKind::Axis0, "float64") => 2048,
@@ -465,6 +665,100 @@ fn should_parallelize_axis(axis: AxisKind, rows: usize, cols: usize, dtype: &'st
         return false;
     }
     should_parallelize(rows, cols, dtype)
+}
+
+fn axis_parallel_policy(
+    axis: AxisKind,
+    dtype: &'static str,
+    rows: usize,
+    cols: usize,
+    allow_parallel: bool,
+) -> bool {
+    if !allow_parallel || rows == 0 || cols == 0 {
+        return false;
+    }
+
+    if let Ok(guard) = adaptive_state().lock() {
+        let seq_samples = guard.axis_sample_count(axis, dtype, false);
+        // Prefer sequential execution for smaller float32 axis-0 workloads when data suggests parity.
+        if axis == AxisKind::Axis0 && dtype == "float32" && rows <= 1024 {
+            if seq_samples >= 3 {
+                if let (Some(par_median), Some(seq_median)) = (
+                    guard.axis_median(axis, dtype, true),
+                    guard.axis_median(axis, dtype, false),
+                ) {
+                    if par_median <= seq_median * 1.05 {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        if let (Some(par), Some(seq)) = (
+            guard.axis_median(axis, dtype, true),
+            guard.axis_median(axis, dtype, false),
+        ) {
+            if seq >= par * 0.98 && rows.saturating_mul(cols) <= PARALLEL_MIN_ELEMENTS * 2 {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+fn broadcast_parallel_policy(
+    kind: BroadcastKind,
+    dtype: &'static str,
+    rows: usize,
+    cols: usize,
+    allow_parallel: bool,
+) -> bool {
+    if !allow_parallel {
+        return false;
+    }
+
+    let elements = rows.saturating_mul(cols);
+    match kind {
+        BroadcastKind::Row => {
+            if cols < BROADCAST_PAR_MIN_COLS || elements < PARALLEL_MIN_ELEMENTS {
+                return false;
+            }
+        }
+        BroadcastKind::Column => {
+            if rows < BROADCAST_PAR_MIN_ROWS && cols < BROADCAST_PAR_MIN_COLS {
+                return false;
+            }
+        }
+    }
+
+    let operation = broadcast_operation_name(kind);
+    if let Ok(guard) = adaptive_state().lock() {
+        let seq_samples = guard.operation_sample_count(operation, dtype, false);
+        let par_samples = guard.operation_sample_count(operation, dtype, true);
+
+        if seq_samples > 0 && par_samples == 0 {
+            return false;
+        }
+
+        if par_samples >= 2 && seq_samples >= 1 {
+            if let (Some(par), Some(seq)) = (
+                guard.operation_median(operation, dtype, true),
+                guard.operation_median(operation, dtype, false),
+            ) {
+                if kind == BroadcastKind::Column && dtype == "float32" && rows <= 1024 {
+                    if par <= seq * 1.08 {
+                        return false;
+                    }
+                }
+                if seq >= par * 0.99 {
+                    return false;
+                }
+            }
+        }
+    }
+
+    true
 }
 
 struct AxisOutcome {
@@ -943,6 +1237,15 @@ where
                 unsafe {
                     data.set_len(total_len);
                 }
+                let base_parallel =
+                    should_parallelize(rows, cols, T::DTYPE_NAME) || cols >= BROADCAST_PAR_MIN_COLS;
+                let allow_parallel = broadcast_parallel_policy(
+                    BroadcastKind::Row,
+                    T::DTYPE_NAME,
+                    rows,
+                    cols,
+                    base_parallel,
+                );
                 if T::DTYPE_NAME == "float64" {
                     let lhs = unsafe {
                         std::slice::from_raw_parts(
@@ -959,6 +1262,7 @@ where
                     let out = unsafe {
                         std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f64, data.len())
                     };
+                    let start = Instant::now();
                     let mut used = true;
                     for row in 0..rows {
                         let start = row * cols;
@@ -969,6 +1273,14 @@ where
                         }
                     }
                     if used {
+                        record_broadcast_event(
+                            T::DTYPE_NAME,
+                            rows,
+                            cols,
+                            start.elapsed(),
+                            false,
+                            BroadcastKind::Row,
+                        );
                         return Some(NumericArray::new_owned(data, self.shape.clone()));
                     }
                 } else if T::DTYPE_NAME == "float32" {
@@ -987,8 +1299,9 @@ where
                     let out = unsafe {
                         std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f32, data.len())
                     };
-                    if rows >= 1536 {
+                    if allow_parallel && rows >= 1536 {
                         if let Some(pool) = thread_pool() {
+                            let start = Instant::now();
                             let row_block = 32usize;
                             pool.install(|| {
                                 use rayon::prelude::*;
@@ -1010,9 +1323,18 @@ where
                                         }
                                     });
                             });
+                            record_broadcast_event(
+                                T::DTYPE_NAME,
+                                rows,
+                                cols,
+                                start.elapsed(),
+                                true,
+                                BroadcastKind::Row,
+                            );
                             return Some(NumericArray::new_owned(data, self.shape.clone()));
                         }
                     }
+                    let start = Instant::now();
                     let mut used = true;
                     for row in 0..rows {
                         let start = row * cols;
@@ -1023,26 +1345,54 @@ where
                         }
                     }
                     if used {
+                        record_broadcast_event(
+                            T::DTYPE_NAME,
+                            rows,
+                            cols,
+                            start.elapsed(),
+                            false,
+                            BroadcastKind::Row,
+                        );
                         return Some(NumericArray::new_owned(data, self.shape.clone()));
                     }
                 }
-                if try_parallel(lhs_slice.len(), || {
-                    use rayon::prelude::*;
-                    data.par_chunks_mut(cols)
-                        .zip(lhs_slice.par_chunks(cols))
-                        .for_each(|(out_row, lhs_row)| {
-                            for (idx, dst) in out_row.iter_mut().enumerate() {
-                                *dst = lhs_row[idx] + rhs_slice[idx];
-                            }
-                        });
-                }) {
-                    return Some(NumericArray::new_owned(data, self.shape.clone()));
+                if allow_parallel {
+                    let start = Instant::now();
+                    if try_parallel(lhs_slice.len(), || {
+                        use rayon::prelude::*;
+                        data.par_chunks_mut(cols)
+                            .zip(lhs_slice.par_chunks(cols))
+                            .for_each(|(out_row, lhs_row)| {
+                                for (idx, dst) in out_row.iter_mut().enumerate() {
+                                    *dst = lhs_row[idx] + rhs_slice[idx];
+                                }
+                            });
+                    }) {
+                        record_broadcast_event(
+                            T::DTYPE_NAME,
+                            rows,
+                            cols,
+                            start.elapsed(),
+                            true,
+                            BroadcastKind::Row,
+                        );
+                        return Some(NumericArray::new_owned(data, self.shape.clone()));
+                    }
                 }
+                let start = Instant::now();
                 for row in 0..rows {
                     let start = row * cols;
                     let end = start + cols;
                     T::simd_add(&lhs_slice[start..end], rhs_slice, &mut data[start..end]);
                 }
+                record_broadcast_event(
+                    T::DTYPE_NAME,
+                    rows,
+                    cols,
+                    start.elapsed(),
+                    false,
+                    BroadcastKind::Row,
+                );
                 Some(NumericArray::new_owned(data, self.shape.clone()))
             }
             _ => None,
@@ -1077,24 +1427,41 @@ where
                 data.set_len(total_len);
             }
             let total_elems = rows.saturating_mul(cols);
-            if total_elems <= COLUMN_BROADCAST_DIRECT_MAX_ELEMS
-                && simd::add_column_broadcast_f64(lhs, rhs, rows, cols, data.as_mut_slice())
-            {
-                let out_vec = unsafe {
-                    let ptr = data.as_mut_ptr() as *mut T;
-                    let len = data.len();
-                    let cap = data.capacity();
-                    std::mem::forget(data);
-                    Vec::from_raw_parts(ptr, len, cap)
-                };
-                return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+            if total_elems <= COLUMN_BROADCAST_DIRECT_MAX_ELEMS {
+                let start = Instant::now();
+                if simd::add_column_broadcast_f64(lhs, rhs, rows, cols, data.as_mut_slice()) {
+                    record_broadcast_event(
+                        T::DTYPE_NAME,
+                        rows,
+                        cols,
+                        start.elapsed(),
+                        false,
+                        BroadcastKind::Column,
+                    );
+                    let out_vec = unsafe {
+                        let ptr = data.as_mut_ptr() as *mut T;
+                        let len = data.len();
+                        let cap = data.capacity();
+                        std::mem::forget(data);
+                        Vec::from_raw_parts(ptr, len, cap)
+                    };
+                    return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+                }
             }
-            let allow_parallel =
+            let base_parallel =
                 should_parallelize(rows, cols, T::DTYPE_NAME) || rows >= BROADCAST_PAR_MIN_ROWS;
+            let allow_parallel = broadcast_parallel_policy(
+                BroadcastKind::Column,
+                T::DTYPE_NAME,
+                rows,
+                cols,
+                base_parallel,
+            );
             if allow_parallel {
                 if let Some(pool) = thread_pool() {
                     let threads = pool.current_num_threads().max(1);
                     let min_rows = ((rows + threads - 1) / threads).max(BROADCAST_PAR_MIN_ROWS);
+                    let start = Instant::now();
                     pool.install(|| {
                         use rayon::prelude::*;
                         data.par_chunks_mut(cols)
@@ -1109,6 +1476,14 @@ where
                                 }
                             });
                     });
+                    record_broadcast_event(
+                        T::DTYPE_NAME,
+                        rows,
+                        cols,
+                        start.elapsed(),
+                        true,
+                        BroadcastKind::Column,
+                    );
                     let out_vec = unsafe {
                         let ptr = data.as_mut_ptr() as *mut T;
                         let len = data.len();
@@ -1119,6 +1494,7 @@ where
                     return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
                 }
             }
+            let start = Instant::now();
             for (row_idx, chunk) in lhs.chunks(cols).enumerate() {
                 let scalar = rhs[row_idx];
                 let out_row = &mut data[row_idx * cols..(row_idx + 1) * cols];
@@ -1129,6 +1505,14 @@ where
                     }
                 }
             }
+            record_broadcast_event(
+                T::DTYPE_NAME,
+                rows,
+                cols,
+                start.elapsed(),
+                false,
+                BroadcastKind::Column,
+            );
             let out_vec = unsafe {
                 let ptr = data.as_mut_ptr() as *mut T;
                 let len = data.len();
@@ -1146,24 +1530,41 @@ where
                 data.set_len(total_len);
             }
             let total_elems = rows.saturating_mul(cols);
-            if total_elems <= COLUMN_BROADCAST_DIRECT_MAX_ELEMS
-                && simd::add_column_broadcast_f32(lhs, rhs, rows, cols, data.as_mut_slice())
-            {
-                let out_vec = unsafe {
-                    let ptr = data.as_mut_ptr() as *mut T;
-                    let len = data.len();
-                    let cap = data.capacity();
-                    std::mem::forget(data);
-                    Vec::from_raw_parts(ptr, len, cap)
-                };
-                return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+            if total_elems <= COLUMN_BROADCAST_DIRECT_MAX_ELEMS {
+                let start = Instant::now();
+                if simd::add_column_broadcast_f32(lhs, rhs, rows, cols, data.as_mut_slice()) {
+                    record_broadcast_event(
+                        T::DTYPE_NAME,
+                        rows,
+                        cols,
+                        start.elapsed(),
+                        false,
+                        BroadcastKind::Column,
+                    );
+                    let out_vec = unsafe {
+                        let ptr = data.as_mut_ptr() as *mut T;
+                        let len = data.len();
+                        let cap = data.capacity();
+                        std::mem::forget(data);
+                        Vec::from_raw_parts(ptr, len, cap)
+                    };
+                    return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+                }
             }
-            let allow_parallel =
+            let base_parallel =
                 should_parallelize(rows, cols, T::DTYPE_NAME) || rows >= BROADCAST_PAR_MIN_ROWS;
+            let allow_parallel = broadcast_parallel_policy(
+                BroadcastKind::Column,
+                T::DTYPE_NAME,
+                rows,
+                cols,
+                base_parallel,
+            );
             if allow_parallel {
                 if let Some(pool) = thread_pool() {
                     let threads = pool.current_num_threads().max(1);
                     let min_rows = ((rows + threads - 1) / threads).max(BROADCAST_PAR_MIN_ROWS);
+                    let start = Instant::now();
                     pool.install(|| {
                         use rayon::prelude::*;
                         data.par_chunks_mut(cols)
@@ -1178,6 +1579,14 @@ where
                                 }
                             });
                     });
+                    record_broadcast_event(
+                        T::DTYPE_NAME,
+                        rows,
+                        cols,
+                        start.elapsed(),
+                        true,
+                        BroadcastKind::Column,
+                    );
                     let out_vec = unsafe {
                         let ptr = data.as_mut_ptr() as *mut T;
                         let len = data.len();
@@ -1188,6 +1597,7 @@ where
                     return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
                 }
             }
+            let start = Instant::now();
             for (row_idx, chunk) in lhs.chunks(cols).enumerate() {
                 let scalar = rhs[row_idx];
                 let out_row = &mut data[row_idx * cols..(row_idx + 1) * cols];
@@ -1198,6 +1608,14 @@ where
                     }
                 }
             }
+            record_broadcast_event(
+                T::DTYPE_NAME,
+                rows,
+                cols,
+                start.elapsed(),
+                false,
+                BroadcastKind::Column,
+            );
             let out_vec = unsafe {
                 let ptr = data.as_mut_ptr() as *mut T;
                 let len = data.len();
@@ -1566,8 +1984,15 @@ where
                 if self.is_contiguous()
                     && (T::DTYPE_NAME == "float64" || T::DTYPE_NAME == "float32")
                 {
-                    let allow_parallel =
+                    let base_allow =
                         should_parallelize_axis(AxisKind::Axis0, rows, cols, T::DTYPE_NAME);
+                    let allow_parallel = axis_parallel_policy(
+                        AxisKind::Axis0,
+                        T::DTYPE_NAME,
+                        rows,
+                        cols,
+                        base_allow,
+                    );
                     let start = Instant::now();
                     let outcome = if T::DTYPE_NAME == "float64" {
                         let data = unsafe {
@@ -1593,7 +2018,7 @@ where
                         cols,
                         elapsed,
                         outcome.parallel,
-                        "axis0",
+                        AxisKind::Axis0,
                     );
                     return self.convert_reduction_from_f64(outcome.values, vec![cols], op);
                 }
@@ -1619,8 +2044,15 @@ where
                 if self.is_contiguous()
                     && (T::DTYPE_NAME == "float64" || T::DTYPE_NAME == "float32")
                 {
-                    let allow_parallel =
+                    let base_allow =
                         should_parallelize_axis(AxisKind::Axis1, rows, cols, T::DTYPE_NAME);
+                    let allow_parallel = axis_parallel_policy(
+                        AxisKind::Axis1,
+                        T::DTYPE_NAME,
+                        rows,
+                        cols,
+                        base_allow,
+                    );
                     let start = Instant::now();
                     let outcome = if T::DTYPE_NAME == "float64" {
                         let data = unsafe {
@@ -1646,7 +2078,7 @@ where
                         cols,
                         elapsed,
                         outcome.parallel,
-                        "axis1",
+                        AxisKind::Axis1,
                     );
                     return self.convert_reduction_from_f64(outcome.values, vec![rows], op);
                 }
@@ -1704,6 +2136,26 @@ fn reduce_axis0_f64(
     if cols == 0 || rows == 0 {
         return AxisOutcome {
             values: vec![0.0; cols],
+            parallel: false,
+        };
+    }
+
+    if cols <= SMALL_AXIS_FAST_COLS && rows <= SMALL_AXIS_FAST_ROWS {
+        let mut stack = [0.0f64; SMALL_AXIS_FAST_COLS];
+        for row in data.chunks_exact(cols) {
+            for (idx, &value) in row.iter().enumerate() {
+                stack[idx] += value;
+            }
+        }
+        let mut sums = stack[..cols].to_vec();
+        if matches!(op, Reduction::Mean) {
+            let inv = 1.0 / rows as f64;
+            for value in &mut sums {
+                *value *= inv;
+            }
+        }
+        return AxisOutcome {
+            values: sums,
             parallel: false,
         };
     }
@@ -1875,12 +2327,17 @@ fn reduce_axis0_f32(
             }
         }
         if sums.is_empty() {
-            let mut seq = vec![0.0f64; cols];
-            for row in data.chunks_exact(cols) {
-                accumulate_row_simple_f32(&mut seq, row);
+            if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
+                sums = simd_totals;
+                parallel_used = false;
+            } else {
+                let mut seq = vec![0.0f64; cols];
+                for row in data.chunks_exact(cols) {
+                    accumulate_row_simple_f32(&mut seq, row);
+                }
+                sums = seq;
+                parallel_used = false;
             }
-            sums = seq;
-            parallel_used = false;
         }
         if matches!(op, Reduction::Mean) {
             let inv = 1.0 / rows as f64;
@@ -1895,10 +2352,15 @@ fn reduce_axis0_f32(
     }
 
     if rows <= SMALL_AXIS_PARALLEL_ROWS {
-        let mut sums = vec![0.0f64; cols];
-        for row in data.chunks_exact(cols) {
-            accumulate_row_simple_f32(&mut sums, row);
-        }
+        let mut sums = if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
+            simd_totals
+        } else {
+            let mut seq = vec![0.0f64; cols];
+            for row in data.chunks_exact(cols) {
+                accumulate_row_simple_f32(&mut seq, row);
+            }
+            seq
+        };
         if matches!(op, Reduction::Mean) {
             let inv = 1.0 / rows as f64;
             for value in &mut sums {
@@ -1948,10 +2410,15 @@ fn reduce_axis0_f32(
 
     if sums.is_empty() {
         parallel_used = false;
-        sums = vec![0.0f64; cols];
-        comps = vec![0.0f64; cols];
-        for row in data.chunks_exact(cols) {
-            kahan_accumulate_row_f32(&mut sums, &mut comps, row);
+        if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
+            sums = simd_totals;
+            comps = vec![0.0f64; cols];
+        } else {
+            sums = vec![0.0f64; cols];
+            comps = vec![0.0f64; cols];
+            for row in data.chunks_exact(cols) {
+                kahan_accumulate_row_f32(&mut sums, &mut comps, row);
+            }
         }
     }
 
@@ -2735,6 +3202,25 @@ fn accumulate_row_simple_f32(sums: &mut [f64], row: &[f32]) {
     for (dst, &value) in sums.iter_mut().zip(row.iter()) {
         *dst += value as f64;
     }
+}
+
+fn accumulate_axis0_simd_f32(data: &[f32], rows: usize, cols: usize) -> Option<Vec<f64>> {
+    if rows == 0 || cols == 0 {
+        return Some(vec![0.0; cols]);
+    }
+    let mut totals = vec![0.0f32; cols];
+    let mut iter = data.chunks_exact(cols);
+    if let Some(first_row) = iter.next() {
+        if !simd::add_assign_inplace_f32(&mut totals, first_row) {
+            return None;
+        }
+    }
+    for row in iter {
+        if !simd::add_assign_inplace_f32(&mut totals, row) {
+            return None;
+        }
+    }
+    Some(totals.into_iter().map(|value| value as f64).collect())
 }
 
 fn recommended_accumulators(len: usize) -> usize {

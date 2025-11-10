@@ -44,6 +44,7 @@ impl TileSpec {
     }
 
     /// Helper for contiguous buffers where only the element count is known.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn for_len(len: usize) -> Self {
         let cols = (len as f64).sqrt().round() as usize;
         Self::for_shape(cmp::max(1, len / cmp::max(1, cols)), cmp::max(1, cols))
@@ -68,6 +69,7 @@ impl TileSpec {
     }
 
     /// Returns the number of scalar elements covered by a single tile.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn tile_elems(&self) -> usize {
         self.row_block * self.col_block
     }

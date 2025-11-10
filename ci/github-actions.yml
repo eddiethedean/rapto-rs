@@ -34,3 +34,6 @@ jobs:
       - name: Run cargo tests
         run: cargo test
 
+      - name: Validate benchmark artifacts
+        run: python scripts/validate_benchmark_results.py
+

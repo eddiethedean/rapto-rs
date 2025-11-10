@@ -7,6 +7,8 @@ raptors = pytest.importorskip("raptors")
 @pytest.mark.parametrize(
     "shape,axis",
     [
+        ((8, 16), 0),
+        ((8, 16), 1),
         ((64, 128), 0),
         ((64, 128), 1),
         ((128, 64), 0),
@@ -29,6 +31,8 @@ def test_float64_mean_axes_match_numpy(shape, axis):
 @pytest.mark.parametrize(
     "shape,axis",
     [
+        ((8, 16), 0),
+        ((8, 16), 1),
         ((64, 128), 0),
         ((64, 128), 1),
         ((128, 64), 0),
@@ -48,7 +52,7 @@ def test_float32_mean_axes_match_numpy(shape, axis):
     np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-6)
 
 
-@pytest.mark.parametrize("shape", [(64, 128), (128, 64)])
+@pytest.mark.parametrize("shape", [(8, 16), (64, 128), (128, 64)])
 def test_column_broadcast_matches_numpy(shape):
     rng = np.random.default_rng(7)
     arr = rng.standard_normal(shape).astype(np.float32)
@@ -60,7 +64,7 @@ def test_column_broadcast_matches_numpy(shape):
     np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-6)
 
 
-@pytest.mark.parametrize("shape", [(64, 128), (128, 64)])
+@pytest.mark.parametrize("shape", [(8, 16), (64, 128), (128, 64)])
 def test_scale_matches_numpy(shape):
     rng = np.random.default_rng(13)
     arr = rng.standard_normal(shape).astype(np.float64)
