@@ -4,7 +4,7 @@
 
 - [x] Add broadcasting-aware arithmetic for mismatched shapes.
 - [x] Support additional numeric dtypes (e.g., `i32`, `f32`) in `RustArray`.
-- [ ] Implement slicing/indexing utilities on the Python layer.
+- [x] Implement slicing/indexing utilities on the Python layer.
 - [ ] Improve NumPy interoperability with zero-copy views where safe.
 - [ ] Validate integer reduction rules (e.g., configurable rounding for mean) and document error semantics.
 

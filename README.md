@@ -53,6 +53,11 @@ row_means = scaled.mean_axis(1)
 broadcasted = raptors.broadcast_add(matrix, row)
 f32_sum = raptors.broadcast_add(zeros32, raptors.array([1.0, 2.0, 3.0], dtype="float32"))
 
+# Slice and index arrays with familiar Python semantics (1-D and 2-D today).
+center_block = matrix[0:2, 1:]
+last_col = matrix[:, -1]
+value = matrix.index_array(1, 2)  # -> 6.0
+
 # Interoperate with NumPy (requires numpy) without leaving Python.
 import numpy as np  # type: ignore
 

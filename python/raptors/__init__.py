@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Sequence, Union
+from typing import Iterable, List, Sequence, Tuple, Union
 
 from . import _raptors as _core
 
@@ -10,6 +10,14 @@ RustArray = _core.RustArray
 RustArrayF32 = _core.RustArrayF32
 RustArrayI32 = _core.RustArrayI32
 ShapeLike = Union[int, Sequence[int]]
+ArrayLike = Union[RustArray, RustArrayF32, RustArrayI32]
+
+_SUPPORTED_ARRAY_TYPES: Tuple[type, ...] = (RustArray, RustArrayF32, RustArrayI32)
+_ARRAY_CONSTRUCTORS = {
+    RustArray: _core.array,
+    RustArrayF32: _core.array_f32,
+    RustArrayI32: _core.array_i32,
+}
 
 __all__ = [
     "RustArray",
@@ -22,6 +30,8 @@ __all__ = [
     "broadcast_add",
     "from_numpy",
     "to_numpy",
+    "slice_array",
+    "index_array",
     "__version__",
     "__author__",
     "__github__",
@@ -140,4 +150,165 @@ def _ensure_numpy():
             "NumPy is required for Raptors <-> NumPy conversions."
         ) from exc
     return _np
+
+
+def slice_array(array: ArrayLike, key):
+    """Return a slice of a Raptors array using familiar Python indexing semantics."""
+
+    return _slice_array_impl(array, key)
+
+
+def index_array(array: ArrayLike, *indices: int):
+    """Return a scalar value from a Raptors array using positional indices."""
+
+    if not indices:
+        raise TypeError("index_array requires at least one index")
+    if any(not isinstance(idx, int) for idx in indices):
+        raise TypeError("index_array only accepts integer indices")
+
+    key = indices if len(indices) > 1 else indices[0]
+    result = _slice_array_impl(array, key)
+    if isinstance(result, _SUPPORTED_ARRAY_TYPES):
+        raise TypeError("index_array expected scalar indices but received a slice")
+    return result
+
+
+def _slice_array_impl(array: ArrayLike, key):
+    if not isinstance(array, _SUPPORTED_ARRAY_TYPES):
+        raise TypeError("expected a Raptors array instance")
+
+    shape = array.shape
+    ndim = len(shape)
+    if ndim == 0:
+        raise TypeError("cannot slice scalar Raptors arrays")
+
+    normalized_key = _expand_key(key, ndim)
+
+    if ndim == 1:
+        selector = _prepare_selector(normalized_key[0], shape[0])
+        return _slice_1d(array, selector)
+
+    if ndim == 2:
+        row_selector = _prepare_selector(normalized_key[0], shape[0])
+        col_selector = _prepare_selector(normalized_key[1], shape[1])
+        return _slice_2d(array, row_selector, col_selector)
+
+    raise NotImplementedError("slicing currently supports up to 2-D arrays")
+
+
+def _expand_key(key, ndim: int) -> Tuple[object, ...]:
+    if key is Ellipsis:
+        return tuple(slice(None) for _ in range(ndim))
+
+    if not isinstance(key, tuple):
+        key = (key,)
+
+    expanded: List[object] = []
+    ellipsis_seen = False
+
+    for position, component in enumerate(key):
+        if component is Ellipsis:
+            if ellipsis_seen:
+                raise IndexError("an index can only have a single ellipsis")
+            ellipsis_seen = True
+            remaining = ndim - (len(key) - (position + 1)) - len(expanded)
+            if remaining < 0:
+                raise IndexError("too many indices for array")
+            expanded.extend(slice(None) for _ in range(remaining))
+        else:
+            expanded.append(component)
+
+    if len(expanded) > ndim:
+        raise IndexError("too many indices for array")
+
+    if len(expanded) < ndim:
+        expanded.extend(slice(None) for _ in range(ndim - len(expanded)))
+
+    return tuple(expanded)
+
+
+def _prepare_selector(component, length: int):
+    if isinstance(component, slice):
+        try:
+            start, stop, step = component.indices(length)
+        except ValueError as exc:
+            raise ValueError("slice step cannot be zero") from exc
+        indices = list(range(start, stop, step))
+        return ("slice", indices)
+
+    if isinstance(component, int):
+        return ("index", _normalize_index(component, length))
+
+    raise TypeError("indices must be integers or slices")
+
+
+def _normalize_index(index: int, length: int) -> int:
+    if length == 0:
+        raise IndexError("cannot index an empty axis")
+
+    if index < 0:
+        index += length
+    if index < 0 or index >= length:
+        raise IndexError("index out of bounds")
+    return index
+
+
+def _slice_1d(array: ArrayLike, selector):
+    data = array.to_list()
+
+    kind, payload = selector
+    if kind == "index":
+        return data[payload]
+
+    values = [data[idx] for idx in payload]
+    return _construct_from_python(array, values)
+
+
+def _slice_2d(array: ArrayLike, row_selector, col_selector):
+    rows, cols = array.shape
+    flat = array.to_list()
+    matrix = _reshape_to_matrix(flat, rows, cols)
+
+    row_kind, row_payload = row_selector
+    col_kind, col_payload = col_selector
+
+    if row_kind == "index":
+        row = matrix[row_payload] if rows else []
+        if col_kind == "index":
+            return row[col_payload]
+        values = [row[idx] for idx in col_payload]
+        return _construct_from_python(array, values)
+
+    selected_rows = [matrix[idx] for idx in row_payload]
+
+    if col_kind == "index":
+        values = [row[col_payload] for row in selected_rows]
+        return _construct_from_python(array, values)
+
+    values = [[row[idx] for idx in col_payload] for row in selected_rows]
+    return _construct_from_python(array, values)
+
+
+def _reshape_to_matrix(flat: List[Union[int, float]], rows: int, cols: int):
+    if rows == 0:
+        return []
+    return [flat[row * cols : (row + 1) * cols] for row in range(rows)]
+
+
+def _construct_from_python(template: ArrayLike, values):
+    constructor = _ARRAY_CONSTRUCTORS.get(type(template))
+    if constructor is None:
+        raise TypeError("unsupported Raptors array type")
+    return constructor(values)
+
+
+def _bind_python_getitem():
+    def __getitem__(self, key):
+        return slice_array(self, key)
+
+    for cls in _SUPPORTED_ARRAY_TYPES:
+        setattr(cls, "__getitem__", __getitem__)
+
+
+_bind_python_getitem()
 
