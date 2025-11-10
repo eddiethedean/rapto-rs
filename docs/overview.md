@@ -14,7 +14,17 @@ familiar Python interface.
   arithmetic with broadcasting, and axis reductions.
 - Python package re-exports the Rust types, adds dtype-aware helpers (`array`,
   `zeros`, `ones`, `broadcast_add`), NumPy-style slicing/indexing helpers, and
-  handles roundtrip conversions with NumPy by inspecting array dtype.
+  performs zero-copy NumPy roundtrips whenever memory layout allows (falling
+  back to copies when necessary).
+- SIMD acceleration now covers contiguous elementwise math (add/scale) and
+  row-vector/scalar broadcasts; runtime detection can be overridden with the
+  `RAPTORS_SIMD` environment variable.
+- Large 2-D workloads fan out across a pooled Rayon threadpool (configurable via
+  `RAPTORS_THREADS`), giving row/column broadcasts tangible wins over NumPy on
+  modern CPUs.
+- `scripts/compare_numpy_raptors.py` ships with preset suites (`--suite`) and
+  JSON output for CI/regression dashboards, making it easy to track speedups as
+  kernels evolve.
 - Test suite covers 1-D and 2-D construction, dtype-specific helpers,
   arithmetic, axis reductions, and roundtrips against NumPy when available.
 - CI workflow template (`.github/workflows/build-wheels.yml`) builds platform

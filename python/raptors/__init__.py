@@ -9,6 +9,7 @@ from . import _raptors as _core
 RustArray = _core.RustArray
 RustArrayF32 = _core.RustArrayF32
 RustArrayI32 = _core.RustArrayI32
+simd_enabled = _core.simd_enabled
 ShapeLike = Union[int, Sequence[int]]
 ArrayLike = Union[RustArray, RustArrayF32, RustArrayI32]
 
@@ -30,6 +31,7 @@ __all__ = [
     "broadcast_add",
     "from_numpy",
     "to_numpy",
+    "simd_enabled",
     "slice_array",
     "index_array",
     "__version__",
@@ -111,9 +113,11 @@ def broadcast_add(lhs, rhs):
 
 
 def from_numpy(ndarray):
-    """Create a Raptors array by copying data from a NumPy array.
+    """Create a Raptors array from a NumPy array.
 
     Dtype is inferred from the NumPy array (float64, float32, int32).
+    Returns a zero-copy view when the input is C-contiguous; otherwise
+    a defensive copy is created.
     """
 
     np = _ensure_numpy()
@@ -130,15 +134,15 @@ def from_numpy(ndarray):
 
 
 def to_numpy(array):
-    """Convert a Raptors array into a NumPy array of the matching dtype."""
+    """Convert a Raptors array into a NumPy view of the matching dtype.
+
+    Shares the underlying buffer when possible; falls back to a copy if
+    a view cannot be exposed safely.
+    """
 
     np = _ensure_numpy()
-    if isinstance(array, RustArray):
-        return np.asarray(array.to_numpy(), dtype=np.float64)
-    if isinstance(array, RustArrayF32):
-        return np.asarray(array.to_numpy(), dtype=np.float32)
-    if isinstance(array, RustArrayI32):
-        return np.asarray(array.to_numpy(), dtype=np.int32)
+    if isinstance(array, _SUPPORTED_ARRAY_TYPES):
+        return np.asarray(array)
     raise TypeError("expected a Raptors array instance")
 
 

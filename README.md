@@ -64,7 +64,32 @@ import numpy as np  # type: ignore
 numpy_view = raptors.to_numpy(matrix)
 assert numpy_view.shape == (2, 3)
 assert np.allclose(numpy_view, [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+
+# NumPy ↔ Raptors conversions share memory when layouts are compatible.
+numpy_view[0, 0] = 42.0
+assert matrix.to_list()[0] == 42.0
+
+alias = raptors.from_numpy(numpy_view)
+numpy_view[1, 1] = 99.0
+assert alias.to_list()[4] == 99.0
 ```
+
+### Performance Controls
+
+- Check whether the vectorized kernels are active via `raptors.simd_enabled()`.
+- Force-disable or force-enable SIMD at import time with `RAPTORS_SIMD=0` or `RAPTORS_SIMD=1`.
+- Control the Rayon pool used for large 2-D workloads with `RAPTORS_THREADS=<N>` (values ≤1 fall back to single-threaded execution).
+- Contiguous elementwise add/scale and row/column broadcasts now use the SIMD path, and large matrices fan out across threads automatically.
+- The benchmarking helper accepts presets and JSON export for repeatable runs:
+
+  ```bash
+  # Compare scalar vs SIMD for a single shape
+  PYTHONPATH=python ./scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float64 --simd-mode auto
+  PYTHONPATH=python ./scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float64 --simd-mode disable
+
+  # Run the 2-D suite and capture results for dashboards
+  PYTHONPATH=python ./scripts/compare_numpy_raptors.py --suite 2d --simd-mode auto --output-json results.json
+  ```
 
 ## Continuous Integration
 

@@ -228,6 +228,40 @@ def test_from_numpy_dtype_dispatch():
         raptors.from_numpy(np.array([1, 2, 3], dtype=np.int64))
 
 
+def test_to_numpy_zero_copy_shares_buffer():
+    np = require_numpy()
+
+    arr = raptors.array([1.0, 2.0, 3.0])
+    np_view = raptors.to_numpy(arr)
+    assert np_view.base is arr
+
+    np_view[1] = 42.5
+    assert arr.to_list() == [1.0, 42.5, 3.0]
+
+
+def test_from_numpy_zero_copy_shares_buffer():
+    np = require_numpy()
+
+    base = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
+    arr = raptors.from_numpy(base)
+    assert arr.shape == [2, 2]
+
+    base[0, 0] = 99.0
+    assert arr.to_list()[0] == 99.0
+
+
+def test_from_numpy_non_contiguous_falls_back_to_copy():
+    np = require_numpy()
+
+    base = np.arange(12, dtype=np.float64).reshape(3, 4)
+    view = base[:, ::2]  # non-contiguous slice
+    arr = raptors.from_numpy(view)
+    assert arr.shape == [3, 2]
+
+    view[0, 0] = -123.0
+    assert arr.to_list()[0] != -123.0
+
+
 def test_getitem_scalar_and_slice_1d():
     arr = raptors.array([10.0, 20.0, 30.0, 40.0])
 
@@ -318,4 +352,49 @@ def test_index_array_helper_requires_integers():
 
     with pytest.raises(TypeError):
         raptors.index_array(arr, 0, slice(None))
+
+
+def test_simd_row_broadcast_add():
+    np = require_numpy()
+
+    matrix = raptors.from_numpy(np.arange(12, dtype=np.float64).reshape(3, 4))
+    row = raptors.from_numpy(np.array([10.0, 20.0, 30.0, 40.0]))
+    out = matrix.add(row)
+
+    assert out.shape == [3, 4]
+    expected = (np.arange(12, dtype=np.float64).reshape(3, 4) + np.array([10.0, 20.0, 30.0, 40.0])).ravel()
+    assert out.to_list() == pytest.approx(expected.tolist())
+
+
+def test_simd_same_shape_add():
+    np = require_numpy()
+
+    lhs = raptors.from_numpy(np.ones((2, 3), dtype=np.float64))
+    rhs = raptors.from_numpy(np.full((2, 3), 5.0, dtype=np.float64))
+    out = lhs.add(rhs)
+
+    assert out.shape == [2, 3]
+    assert out.to_list() == [6.0] * 6
+
+
+def test_simd_column_broadcast_add():
+    np = require_numpy()
+
+    matrix = raptors.from_numpy(np.arange(12, dtype=np.float64).reshape(3, 4))
+    column = raptors.from_numpy(np.array([[1.0], [2.0], [3.0]], dtype=np.float64))
+    out = matrix.add(column)
+
+    expected = (np.arange(12, dtype=np.float64).reshape(3, 4)
+                + np.array([[1.0], [2.0], [3.0]], dtype=np.float64)).ravel()
+    assert out.to_list() == pytest.approx(expected.tolist())
+
+
+def test_simd_scale_matches_numpy():
+    np = require_numpy()
+
+    matrix = raptors.from_numpy(np.arange(6, dtype=np.float64).reshape(2, 3))
+    scaled = matrix.scale(1.5)
+
+    expected = (np.arange(6, dtype=np.float64).reshape(2, 3) * 1.5).ravel()
+    assert scaled.to_list() == pytest.approx(expected.tolist())
 
