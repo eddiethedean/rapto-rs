@@ -13,8 +13,7 @@ pub fn reduce_sum_f64(input: &[f64], accumulators: usize) -> Option<f64> {
 
 #[cfg(target_arch = "aarch64")]
 pub fn reduce_sum_f64(input: &[f64], accumulators: usize) -> Option<f64> {
-    let _ = accumulators;
-    Some(unsafe { neon::reduce_sum_f64(input) })
+    Some(unsafe { neon::reduce_sum_f64(input, accumulators) })
 }
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -33,8 +32,7 @@ pub fn reduce_sum_f32(input: &[f32], accumulators: usize) -> Option<f64> {
 
 #[cfg(target_arch = "aarch64")]
 pub fn reduce_sum_f32(input: &[f32], accumulators: usize) -> Option<f64> {
-    let _ = accumulators;
-    Some(unsafe { neon::reduce_sum_f32(input) })
+    Some(unsafe { neon::reduce_sum_f32(input, accumulators) })
 }
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -885,33 +883,44 @@ mod neon {
 
     const LANES_F64: usize = 2;
     const LANES_F32: usize = 4;
+    const MAX_ACCUMULATORS_F64: usize = 4;
+    const MAX_ACCUMULATORS_F32: usize = 8;
 
     #[target_feature(enable = "neon")]
-    pub unsafe fn reduce_sum_f64(input: &[f64]) -> f64 {
+    pub unsafe fn reduce_sum_f64(input: &[f64], accumulators: usize) -> f64 {
         let len = input.len();
         if len == 0 {
             return 0.0;
         }
 
-        let mut acc0 = vdupq_n_f64(0.0);
-        let mut acc1 = vdupq_n_f64(0.0);
+        let acc_count = accumulators.clamp(1, MAX_ACCUMULATORS_F64);
+        let mut regs = [vdupq_n_f64(0.0); MAX_ACCUMULATORS_F64];
         let mut index = 0usize;
         let ptr = input.as_ptr();
+        let step = acc_count * LANES_F64;
 
-        while index + (LANES_F64 * 2) <= len {
-            let a = vld1q_f64(ptr.add(index));
-            let b = vld1q_f64(ptr.add(index + LANES_F64));
-            acc0 = vaddq_f64(acc0, a);
-            acc1 = vaddq_f64(acc1, b);
-            index += LANES_F64 * 2;
+        while index + step <= len {
+            let mut offset = index;
+            for slot in 0..acc_count {
+                let vec = vld1q_f64(ptr.add(offset));
+                regs[slot] = vaddq_f64(regs[slot], vec);
+                offset += LANES_F64;
+            }
+            index += step;
         }
-        if index + LANES_F64 <= len {
-            let a = vld1q_f64(ptr.add(index));
-            acc0 = vaddq_f64(acc0, a);
+
+        let mut tail = vdupq_n_f64(0.0);
+        while index + LANES_F64 <= len {
+            let vec = vld1q_f64(ptr.add(index));
+            tail = vaddq_f64(tail, vec);
             index += LANES_F64;
         }
+        regs[0] = vaddq_f64(regs[0], tail);
 
-        let mut total = vaddvq_f64(acc0) + vaddvq_f64(acc1);
+        let mut total = 0.0;
+        for slot in 0..acc_count {
+            total += vaddvq_f64(regs[slot]);
+        }
         while index < len {
             total += *ptr.add(index);
             index += 1;
@@ -920,31 +929,40 @@ mod neon {
     }
 
     #[target_feature(enable = "neon")]
-    pub unsafe fn reduce_sum_f32(input: &[f32]) -> f64 {
+    pub unsafe fn reduce_sum_f32(input: &[f32], accumulators: usize) -> f64 {
         let len = input.len();
         if len == 0 {
             return 0.0;
         }
 
-        let mut acc0 = vdupq_n_f32(0.0);
-        let mut acc1 = vdupq_n_f32(0.0);
+        let acc_count = accumulators.clamp(1, MAX_ACCUMULATORS_F32);
+        let mut regs = [vdupq_n_f32(0.0); MAX_ACCUMULATORS_F32];
         let mut index = 0usize;
         let ptr = input.as_ptr();
+        let step = acc_count * LANES_F32;
 
-        while index + (LANES_F32 * 2) <= len {
-            let a = vld1q_f32(ptr.add(index));
-            let b = vld1q_f32(ptr.add(index + LANES_F32));
-            acc0 = vaddq_f32(acc0, a);
-            acc1 = vaddq_f32(acc1, b);
-            index += LANES_F32 * 2;
+        while index + step <= len {
+            let mut offset = index;
+            for slot in 0..acc_count {
+                let vec = vld1q_f32(ptr.add(offset));
+                regs[slot] = vaddq_f32(regs[slot], vec);
+                offset += LANES_F32;
+            }
+            index += step;
         }
-        if index + LANES_F32 <= len {
-            let a = vld1q_f32(ptr.add(index));
-            acc0 = vaddq_f32(acc0, a);
+
+        let mut tail = vdupq_n_f32(0.0);
+        while index + LANES_F32 <= len {
+            let vec = vld1q_f32(ptr.add(index));
+            tail = vaddq_f32(tail, vec);
             index += LANES_F32;
         }
+        regs[0] = vaddq_f32(regs[0], tail);
 
-        let mut total = vaddvq_f32(acc0) as f64 + vaddvq_f32(acc1) as f64;
+        let mut total = 0.0f64;
+        for slot in 0..acc_count {
+            total += vaddvq_f32(regs[slot]) as f64;
+        }
         while index < len {
             total += *ptr.add(index) as f64;
             index += 1;

@@ -13,6 +13,8 @@ mod reduce;
 mod simd;
 mod tiling;
 
+use crate::reduce::tiled::SMALL_DIRECT_THRESHOLD;
+
 use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
 use numpy::{Element, PyArrayDyn, PyReadonlyArrayDyn, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyTypeError, PyValueError};
@@ -353,7 +355,7 @@ enum AxisKind {
 fn axis_parallel_cutover(axis: AxisKind, dtype: &'static str) -> usize {
     match (axis, dtype) {
         (AxisKind::Axis0, "float64") => 2048,
-        (AxisKind::Axis0, "float32") => 4096,
+        (AxisKind::Axis0, "float32") => 1536,
         (AxisKind::Axis1, "float64") => 1536,
         (AxisKind::Axis1, "float32") => 2048,
         _ => 2048,
@@ -391,7 +393,8 @@ fn parallel_scale_f64(
             use rayon::prelude::*;
             input
                 .par_chunks(cols)
-                .zip(out.par_chunks_mut(cols))
+                .with_min_len(cols * 8)
+                .zip(out.par_chunks_mut(cols).with_min_len(cols * 8))
                 .for_each(|(src_row, dst_row)| {
                     if !simd::scale_same_shape_f64(src_row, factor, dst_row) {
                         for (dst, &value) in dst_row.iter_mut().zip(src_row.iter()) {
@@ -422,7 +425,8 @@ fn parallel_scale_f32(
             use rayon::prelude::*;
             input
                 .par_chunks(cols)
-                .zip(out.par_chunks_mut(cols))
+                .with_min_len(cols * 8)
+                .zip(out.par_chunks_mut(cols).with_min_len(cols * 8))
                 .for_each(|(src_row, dst_row)| {
                     if !simd::scale_same_shape_f32(src_row, factor_f32, dst_row) {
                         for (dst, &value) in dst_row.iter_mut().zip(src_row.iter()) {
@@ -790,7 +794,10 @@ where
         }
         let lhs_slice = self.data_slice();
         let rhs_slice = other.data_slice();
-        let mut data = vec![T::zero(); len];
+        let mut data = Vec::with_capacity(len);
+        unsafe {
+            data.set_len(len);
+        }
         if T::DTYPE_NAME == "float64" {
             let lhs = unsafe { std::slice::from_raw_parts(lhs_slice.as_ptr() as *const f64, len) };
             let rhs = unsafe { std::slice::from_raw_parts(rhs_slice.as_ptr() as *const f64, len) };
@@ -876,6 +883,32 @@ where
                     let out = unsafe {
                         std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f32, data.len())
                     };
+                    if rows >= 1536 {
+                        if let Some(pool) = thread_pool() {
+                            let row_block = 32usize;
+                            pool.install(|| {
+                                use rayon::prelude::*;
+                                out.par_chunks_mut(cols * row_block)
+                                    .zip(lhs.par_chunks(cols * row_block))
+                                    .for_each(|(out_block, lhs_block)| {
+                                        for (out_row, lhs_row) in
+                                            out_block.chunks_mut(cols).zip(lhs_block.chunks(cols))
+                                        {
+                                            if !simd::add_same_shape_f32(lhs_row, rhs, out_row) {
+                                                for ((dst, &l), &r) in out_row
+                                                    .iter_mut()
+                                                    .zip(lhs_row.iter())
+                                                    .zip(rhs.iter())
+                                                {
+                                                    *dst = l + r;
+                                                }
+                                            }
+                                        }
+                                    });
+                            });
+                            return Some(NumericArray::new_owned(data, self.shape.clone()));
+                        }
+                    }
                     let mut used = true;
                     for row in 0..rows {
                         let start = row * cols;
@@ -958,6 +991,24 @@ where
             };
             if simd::add_column_broadcast_f32(lhs, rhs, rows, cols, out) {
                 return Some(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            if should_parallelize(rows, cols, T::DTYPE_NAME) {
+                if let Some(pool) = thread_pool() {
+                    pool.install(|| {
+                        use rayon::prelude::*;
+                        lhs.par_chunks(cols)
+                            .zip(out.par_chunks_mut(cols))
+                            .zip(rhs.par_iter().copied())
+                            .for_each(|((lhs_row, out_row), scalar)| {
+                                if !simd::add_row_scalar_f32(lhs_row, scalar, out_row) {
+                                    for (dst, &value) in out_row.iter_mut().zip(lhs_row.iter()) {
+                                        *dst = value + scalar;
+                                    }
+                                }
+                            });
+                    });
+                    return Some(NumericArray::new_owned(data, self.shape.clone()));
+                }
             }
         }
         if try_parallel(lhs_slice.len(), || {
@@ -1289,30 +1340,48 @@ where
         }
 
         let len = self.data_len();
-        let mut data = vec![T::zero(); len];
+        let mut data = Vec::with_capacity(len);
+        unsafe {
+            data.set_len(len);
+        }
         let (rows, cols) = self.matrix_dims();
         if T::DTYPE_NAME == "float64" {
             let input = self.data_slice();
             let input = unsafe { std::slice::from_raw_parts(input.as_ptr() as *const f64, len) };
             let out = unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f64, len) };
-            if should_parallelize(rows, cols, T::DTYPE_NAME)
-                && parallel_scale_f64(input, factor, out, rows, cols)
-            {
+            if len <= SMALL_DIRECT_THRESHOLD {
+                for (dst, &value) in out.iter_mut().zip(input.iter()) {
+                    *dst = value * factor;
+                }
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
+            let allow_parallel = should_parallelize(rows, cols, T::DTYPE_NAME);
             if simd::scale_same_shape_f64(input, factor, out) {
+                return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            if allow_parallel && parallel_scale_f64(input, factor, out, rows, cols) {
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
         } else if T::DTYPE_NAME == "float32" {
             let input = self.data_slice();
             let input = unsafe { std::slice::from_raw_parts(input.as_ptr() as *const f32, len) };
             let out = unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f32, len) };
-            if should_parallelize(rows, cols, T::DTYPE_NAME)
-                && parallel_scale_f32(input, factor, out, rows, cols)
+            if len <= SMALL_DIRECT_THRESHOLD {
+                let factor_f32 = factor as f32;
+                for (dst, &value) in out.iter_mut().zip(input.iter()) {
+                    *dst = value * factor_f32;
+                }
+                return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            let allow_parallel = should_parallelize(rows, cols, T::DTYPE_NAME);
+            if allow_parallel && rows >= 1024 && parallel_scale_f32(input, factor, out, rows, cols)
             {
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if simd::scale_same_shape_f32(input, factor as f32, out) {
+                return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            if allow_parallel && parallel_scale_f32(input, factor, out, rows, cols) {
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
         }
@@ -1593,14 +1662,15 @@ fn reduce_axis0_f32(
             parallel_used = true;
             pool.install(|| {
                 use rayon::prelude::*;
-                data.par_chunks(cols.saturating_mul(64).max(cols))
-                    .map(|chunk| {
-                        let mut partial = vec![0.0f32; cols];
-                        for row in chunk.chunks(cols) {
-                            accumulate_row_f32(&mut partial, row);
-                        }
-                        partial
-                    })
+                data.par_chunks(cols)
+                    .with_min_len(cols * 16)
+                    .fold(
+                        || vec![0.0f32; cols],
+                        |mut acc, row| {
+                            accumulate_row_f32(&mut acc, row);
+                            acc
+                        },
+                    )
                     .reduce(
                         || vec![0.0f32; cols],
                         |mut acc, partial| {

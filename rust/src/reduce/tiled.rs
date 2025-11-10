@@ -2,7 +2,23 @@ use crate::simd;
 use crate::tiling::TileSpec;
 
 const DIRECT_REDUCTION_LIMIT: usize = 1 << 20;
-const SMALL_DIRECT_THRESHOLD: usize = 1 << 12;
+const DIRECT_PARALLEL_MIN_ELEMENTS: usize = 1 << 21;
+const DIRECT_MIN_ROWS_PER_CHUNK: usize = 128;
+pub(crate) const SMALL_DIRECT_THRESHOLD: usize = 1 << 12;
+
+fn recommended_accumulators(len: usize, max: usize) -> usize {
+    if len >= 1 << 22 {
+        max
+    } else if len >= 1 << 20 {
+        max.saturating_sub(1).max(1)
+    } else if len >= 1 << 18 {
+        (max / 2).max(1)
+    } else if len >= 1 << 16 {
+        3.min(max).max(1)
+    } else {
+        1
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum GlobalOp {
@@ -52,7 +68,8 @@ pub fn reduce_full_f64(
     }
 
     if elements <= DIRECT_REDUCTION_LIMIT {
-        let total = direct_sum_f64(data);
+        let direct_pool = if allow_parallel { pool } else { None };
+        let total = direct_sum_f64(data, rows, cols, direct_pool);
         return ReduceOutcome {
             value: op.finalize(total, elements),
             tiles_processed: 1,
@@ -108,7 +125,8 @@ pub fn reduce_full_f32(
     }
 
     if elements <= DIRECT_REDUCTION_LIMIT {
-        let total = direct_sum_f32(data);
+        let direct_pool = if allow_parallel { pool } else { None };
+        let total = direct_sum_f32(data, rows, cols, direct_pool);
         return ReduceOutcome {
             value: op.finalize(total, elements),
             tiles_processed: 1,
@@ -145,18 +163,60 @@ pub fn reduce_full_f32(
     }
 }
 
-fn direct_sum_f64(data: &[f64]) -> f64 {
+fn direct_sum_f64(data: &[f64], rows: usize, cols: usize, pool: Option<&rayon::ThreadPool>) -> f64 {
     if data.len() <= SMALL_DIRECT_THRESHOLD {
         return data.iter().copied().sum();
     }
-    simd::reduce_sum_f64(data, 1).unwrap_or_else(|| data.iter().copied().sum())
+    if let Some(pool) = pool {
+        let elements = rows.saturating_mul(cols);
+        let threads = pool.current_num_threads().max(1);
+        let chunk_rows = (rows / threads).max(1);
+        if elements >= DIRECT_PARALLEL_MIN_ELEMENTS || chunk_rows >= DIRECT_MIN_ROWS_PER_CHUNK {
+            let chunk_len = cols
+                .saturating_mul(chunk_rows)
+                .max(cols.saturating_mul(DIRECT_MIN_ROWS_PER_CHUNK.min(rows)));
+            return pool.install(|| {
+                use rayon::prelude::*;
+                data.par_chunks(chunk_len)
+                    .map(|chunk| {
+                        let acc = recommended_accumulators(chunk.len(), 8);
+                        simd::reduce_sum_f64(chunk, acc)
+                            .unwrap_or_else(|| chunk.iter().copied().sum())
+                    })
+                    .sum()
+            });
+        }
+    }
+    let acc = recommended_accumulators(data.len(), 8);
+    simd::reduce_sum_f64(data, acc).unwrap_or_else(|| data.iter().copied().sum())
 }
 
-fn direct_sum_f32(data: &[f32]) -> f64 {
+fn direct_sum_f32(data: &[f32], rows: usize, cols: usize, pool: Option<&rayon::ThreadPool>) -> f64 {
     if data.len() <= SMALL_DIRECT_THRESHOLD {
         return data.iter().map(|&v| v as f64).sum();
     }
-    simd::reduce_sum_f32(data, 1).unwrap_or_else(|| data.iter().map(|&v| v as f64).sum())
+    if let Some(pool) = pool {
+        let elements = rows.saturating_mul(cols);
+        let threads = pool.current_num_threads().max(1);
+        let chunk_rows = (rows / threads).max(1);
+        if elements >= DIRECT_PARALLEL_MIN_ELEMENTS || chunk_rows >= DIRECT_MIN_ROWS_PER_CHUNK {
+            let chunk_len = cols
+                .saturating_mul(chunk_rows)
+                .max(cols.saturating_mul(DIRECT_MIN_ROWS_PER_CHUNK.min(rows)));
+            return pool.install(|| {
+                use rayon::prelude::*;
+                data.par_chunks(chunk_len)
+                    .map(|chunk| {
+                        let acc = recommended_accumulators(chunk.len(), 8);
+                        simd::reduce_sum_f32(chunk, acc)
+                            .unwrap_or_else(|| chunk.iter().map(|&v| v as f64).sum::<f64>())
+                    })
+                    .sum()
+            });
+        }
+    }
+    let acc = recommended_accumulators(data.len(), 8);
+    simd::reduce_sum_f32(data, acc).unwrap_or_else(|| data.iter().map(|&v| v as f64).sum())
 }
 
 fn sequential_sum_f64(
