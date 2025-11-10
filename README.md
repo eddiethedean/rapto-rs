@@ -89,6 +89,11 @@ assert alias.to_list()[4] == 99.0
 
   # Run the 2-D suite and capture results for dashboards
   PYTHONPATH=python ./scripts/compare_numpy_raptors.py --suite 2d --simd-mode auto --output-json results.json
+
+  # Guard against regressions in CI using baseline thresholds
+  PYTHONPATH=python ./scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float64 \
+      --operations mean mean_axis0 mean_axis1 broadcast_add \
+      --validate-json benchmarks/baselines/2d_float64.json --validate-slack 1.0
   ```
 
 ## Continuous Integration

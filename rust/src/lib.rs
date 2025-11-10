@@ -123,6 +123,18 @@ where
     }
 }
 
+fn should_parallelize(rows: usize, cols: usize, dtype: &'static str) -> bool {
+    let elements = rows.saturating_mul(cols);
+    if elements < PARALLEL_MIN_ELEMENTS {
+        return false;
+    }
+    match dtype {
+        "float64" => rows >= 64 && cols >= 64,
+        "float32" => rows >= 128 && cols >= 64,
+        _ => rows >= 128 && cols >= 128,
+    }
+}
+
 #[inline]
 fn add_assign_f64(acc: &mut [f64], row: &[f64]) {
     for (dst, &value) in acc.iter_mut().zip(row.iter()) {
@@ -900,6 +912,7 @@ where
             0 => {
                 if self.is_contiguous()
                     && (T::DTYPE_NAME == "float64" || T::DTYPE_NAME == "float32")
+                    && should_parallelize(rows, cols, T::DTYPE_NAME)
                 {
                     let values = if T::DTYPE_NAME == "float64" {
                         let data = unsafe {
@@ -941,6 +954,7 @@ where
             1 => {
                 if self.is_contiguous()
                     && (T::DTYPE_NAME == "float64" || T::DTYPE_NAME == "float32")
+                    && should_parallelize(rows, cols, T::DTYPE_NAME)
                 {
                     let values = if T::DTYPE_NAME == "float64" {
                         let data = unsafe {

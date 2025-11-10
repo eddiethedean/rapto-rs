@@ -14,8 +14,11 @@
    - Public helpers cover contiguous add/scale kernels plus row/column scalar broadcasts. Each helper returns `false` when the ISA is unavailable, signalling the caller to fall back to scalar code.
 
 2. **NumericArray Integration**
-   - `NumericArray::try_simd_add_*` normalises slices, calls into the SIMD helpers, and retains a scalar tail for mixed layouts.
-   - New `try_parallel` utility spins up a Rayon pool (respecting `RAPTORS_THREADS`) and parallelises row chunks once workloads exceed 32K elements. Scalar behaviour is untouched for tiny arrays.
+   - `NumericArray::try_simd_add_*` normalises slices, calls into the SIMD helpers,
+     and retains a scalar tail for mixed layouts.
+   - `try_parallel` now works with adaptive heuristics (`should_parallelize`) so
+     only genuinely large, well-shaped workloads pay the Rayon cost; scalar loops
+     remain for small arrays.
    - Column broadcasts now use SIMD row scalars and parallel rows when available.
 
 3. **Threading Controls**
@@ -32,17 +35,21 @@ Recent measurements on an Apple M3 Pro (Python 3.11, SIMD auto, `RAPTORS_THREADS
 
 | Shape / Dtype | Operation | NumPy (ms) | Raptors (ms) | Speedup | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `(1024, 1024)` `float32` | sum | 0.31 ± 0.00 | 0.21 ± 0.01 | **1.48×** | AVX2/NEON lanes engaged; parallel tail disabled (small array) |
-| `(1024, 1024)` `float32` | mean | 0.32 ± 0.01 | 0.21 ± 0.01 | **1.54×** | Scalar fallback computes axis reductions |
-| `(1024, 1024)` `float64` | broadcast add (row) | 1.69 ± 2.19 | 0.65 ± 0.00 | **2.61×** | Row broadcast now hits SIMD + row tiling |
-| `(2048, 2048)` `float64` | broadcast add (row) | 4.72 ± 1.41 | 3.35 ± 1.27 | **1.41×** | Rayon splits rows; SIMD covers chunk bodies |
+| `(1024, 1024)` `float32` | sum | 0.31 ± 0.00 | 0.21 ± 0.01 | **1.48×** | AVX2/NEON lanes engaged; adaptive heuristics keep work single-threaded |
+| `(1024, 1024)` `float32` | mean | 0.32 ± 0.01 | 0.21 ± 0.01 | **1.54×** | Scalar fallback handles reductions |
+| `(1024, 1024)` `float64` | mean_axis0 | 0.18 ± 0.06 | 0.12 ± 0.05 | **1.50×** | Fused SIMD/Rayon reduction |
+| `(1024, 1024)` `float64` | mean_axis1 | 0.15 ± 0.00 | 0.12 ± 0.02 | **1.28×** | Fused SIMD/Rayon reduction |
+| `(1024, 1024)` `float64` | broadcast add (row) | 0.70 ± 0.08 | 0.67 ± 0.19 | 1.05× | Row broadcast hits SIMD + tiling |
 | `(2048, 2048)` `float64` | scale | 2.80 ± 0.12 | 2.19 ± 0.15 | **1.28×** | Parallel lanes plus vector scalar multiply |
 
 Key observations:
 
 - Broadcasted row/column additions now share the same SIMD helpers as the dense path and outperform NumPy once row tiling kicks in.
-- Reduction-heavy operations (`mean_axis0/1`) still lean on scalar loops; multi-threading helps but SIMD is not yet fused, so NumPy retains the lead.
-- Column broadcasts benefit modestly (close to parity) thanks to scalar-vector helpers and row-level parallelism.
+— Reduction-heavy operations (`mean_axis0/1`) now beat NumPy when arrays are
+  contiguous float64/f32 thanks to the fused reduce kernels; scalar fallback
+  still lags when SIMD is disabled.
+— Column broadcasts benefit modestly (close to parity) thanks to scalar-vector
+  helpers and row-level parallelism.
 
 ## Testing & Tooling
 
@@ -52,10 +59,15 @@ Key observations:
 
 ## Remaining Gaps & Next Steps
 
-- **Axis Reductions**: Implement vectorised row/column reductions and combine with parallel chunking to narrow the `mean_axis*` gap.
-- **Fused Kernels**: Add batched primitives (e.g., `axpy`, dot products) to amortize memory traffic and compete with NumPy BLAS-backed routes.
-- **Dynamic Tiling**: Tune tile sizes per ISA and array shape; consider cache-aware blocking to reduce L1 misses on large matrices.
-- **Adaptive Threading**: Surface a Python-side toggle (or context manager) for thread pools and expose the actual thread count for diagnostics.
+- **Global Reductions**: The all-elements `mean/sum` still trail NumPy; wider
+  lanes (AVX-512/SVE) and cache-aware tiling are next targets.
+- **Fused Kernels**: Add batched primitives (e.g., `axpy`, dot products) to
+  amortize memory traffic and compete with NumPy BLAS-backed routes.
+- **Dynamic Tiling**: Tune tile sizes per ISA and array shape; consider
+  cache-aware blocking to reduce L1 misses on large matrices.
+- **Adaptive Threading Diagnostics**: Surface a Python-side toggle (or context
+  manager) for thread pools and expose the actual thread count for
+  instrumentation.
 - **Cross-Platform Benchmarks**: Capture AVX2/Xeon results to confirm parity with ARM NEON, and publish combined charts in the docs.
 
 The SIMD + threading foundation is in place; the next iterations focus on reduction fusion and polishing the ergonomics around performance instrumentation.

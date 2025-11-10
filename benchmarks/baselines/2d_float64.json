@@ -1,0 +1,26 @@
+[
+  {
+    "shape": [1024, 1024],
+    "dtype": "float64",
+    "operation": "mean",
+    "max_raptors_ms": 0.50
+  },
+  {
+    "shape": [1024, 1024],
+    "dtype": "float64",
+    "operation": "mean_axis0",
+    "max_raptors_ms": 0.50
+  },
+  {
+    "shape": [1024, 1024],
+    "dtype": "float64",
+    "operation": "mean_axis1",
+    "max_raptors_ms": 0.70
+  },
+  {
+    "shape": [1024, 1024],
+    "dtype": "float64",
+    "operation": "broadcast_add",
+    "max_raptors_ms": 1.20
+  }
+]

@@ -283,6 +283,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--output-json",
         help="Optional path to write detailed benchmark results in JSON format.",
     )
+    parser.add_argument(
+        "--validate-json",
+        help="Optional baseline JSON; fail if Raptors timings exceed recorded limits.",
+    )
+    parser.add_argument(
+        "--validate-slack",
+        type=float,
+        default=0.0,
+        help="Additional slack (ms) added to each baseline max when validating.",
+    )
 
     args = parser.parse_args(argv)
 
@@ -324,6 +334,43 @@ def main(argv: Sequence[str] | None = None) -> int:
         with open(args.output_json, "w", encoding="utf-8") as handle:
             json.dump(json_output, handle, indent=2)
         print(f"\nWrote JSON results to {args.output_json}")
+
+    if args.validate_json:
+        with open(args.validate_json, "r", encoding="utf-8") as handle:
+            baselines = json.load(handle)
+
+        failure_messages: List[str] = []
+        # Build lookup for measured results
+        measurements: Dict[Tuple[Tuple[int, ...], str, str], float] = {}
+        for case in json_output:
+            shape = tuple(int(dim) for dim in case["shape"])
+            dtype_name = str(case["dtype"])
+            for op in case["operations"]:
+                key = (shape, dtype_name, str(op["name"]))
+                measurements[key] = float(op["raptors_mean_s"]) * 1_000.0  # ms
+
+        for entry in baselines:
+            shape = tuple(int(dim) for dim in entry.get("shape", []))
+            dtype_name = str(entry.get("dtype"))
+            operation = str(entry.get("operation"))
+            max_ms = float(entry.get("max_raptors_ms"))
+            key = (shape, dtype_name, operation)
+            measured = measurements.get(key)
+            if measured is None:
+                failure_messages.append(
+                    f"[validate] Missing measurement for shape={shape}, dtype={dtype_name}, operation={operation}"
+                )
+                continue
+            if measured > max_ms + args.validate_slack:
+                failure_messages.append(
+                    f"[validate] {operation} @ shape={shape} dtype={dtype_name}: {measured:.2f} ms > allowed {max_ms + args.validate_slack:.2f} ms"
+                )
+
+        if failure_messages:
+            print("\nValidation failures detected:")
+            for message in failure_messages:
+                print(message)
+            return 1
 
     return 0
 
