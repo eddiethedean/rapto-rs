@@ -12,4 +12,5 @@ target/
 *.egg-info/
 wheelhouse/
 .DS_Store
+benchmarks/results/
 

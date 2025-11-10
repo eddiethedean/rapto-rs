@@ -30,9 +30,12 @@ RAPTORS_DTYPES = {
 
 PRESET_SUITES = {
     "2d": (
+        {"shape": (512, 512), "dtype": "float64"},
+        {"shape": (512, 512), "dtype": "float32"},
         {"shape": (1024, 1024), "dtype": "float64"},
         {"shape": (1024, 1024), "dtype": "float32"},
         {"shape": (2048, 2048), "dtype": "float64"},
+        {"shape": (2048, 2048), "dtype": "float32"},
     ),
     "mixed": (
         {"shape": (4096,), "dtype": "float64"},
@@ -253,7 +256,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--operations",
         nargs="*",
-        default=["sum", "mean", "mean_axis0", "broadcast_add", "scale"],
+        default=["sum", "mean", "mean_axis0", "mean_axis1", "broadcast_add", "scale"],
         help="Operations to benchmark (default: common set)",
     )
     parser.add_argument(

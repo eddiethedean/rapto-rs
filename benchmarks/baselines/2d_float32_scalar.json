@@ -4,161 +4,161 @@
       512,
       512
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "sum",
-    "max_raptors_ms": 0.0526
+    "max_raptors_ms": 0.0264
   },
   {
     "shape": [
       512,
       512
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "mean",
-    "max_raptors_ms": 0.0525
+    "max_raptors_ms": 0.0264
   },
   {
     "shape": [
       512,
       512
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "mean_axis0",
-    "max_raptors_ms": 0.0419
+    "max_raptors_ms": 0.0329
   },
   {
     "shape": [
       512,
       512
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "mean_axis1",
-    "max_raptors_ms": 0.0361
+    "max_raptors_ms": 0.0147
   },
   {
     "shape": [
       512,
       512
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "broadcast_add",
-    "max_raptors_ms": 0.2091
+    "max_raptors_ms": 0.0532
   },
   {
     "shape": [
       512,
       512
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "scale",
-    "max_raptors_ms": 0.1492
+    "max_raptors_ms": 0.0299
   },
   {
     "shape": [
       1024,
       1024
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "sum",
-    "max_raptors_ms": 0.322
+    "max_raptors_ms": 0.1765
   },
   {
     "shape": [
       1024,
       1024
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "mean",
-    "max_raptors_ms": 0.2991
+    "max_raptors_ms": 0.0858
   },
   {
     "shape": [
       1024,
       1024
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "mean_axis0",
-    "max_raptors_ms": 0.3218
+    "max_raptors_ms": 0.1746
   },
   {
     "shape": [
       1024,
       1024
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "mean_axis1",
-    "max_raptors_ms": 0.1659
+    "max_raptors_ms": 0.1268
   },
   {
     "shape": [
       1024,
       1024
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "broadcast_add",
-    "max_raptors_ms": 0.8271
+    "max_raptors_ms": 0.8096
   },
   {
     "shape": [
       1024,
       1024
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "scale",
-    "max_raptors_ms": 0.8719
+    "max_raptors_ms": 0.6365
   },
   {
     "shape": [
       2048,
       2048
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "sum",
-    "max_raptors_ms": 0.3557
+    "max_raptors_ms": 0.3243
   },
   {
     "shape": [
       2048,
       2048
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "mean",
-    "max_raptors_ms": 0.3616
+    "max_raptors_ms": 0.4106
   },
   {
     "shape": [
       2048,
       2048
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "mean_axis0",
-    "max_raptors_ms": 0.4767
+    "max_raptors_ms": 0.5525
   },
   {
     "shape": [
       2048,
       2048
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "mean_axis1",
-    "max_raptors_ms": 0.5519
+    "max_raptors_ms": 0.3493
   },
   {
     "shape": [
       2048,
       2048
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "broadcast_add",
-    "max_raptors_ms": 4.1345
+    "max_raptors_ms": 0.9509
   },
   {
     "shape": [
       2048,
       2048
     ],
-    "dtype": "float64",
+    "dtype": "float32",
     "operation": "scale",
-    "max_raptors_ms": 4.4937
+    "max_raptors_ms": 0.6708
   }
 ]

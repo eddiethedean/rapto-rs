@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Iterable, List, Sequence, Tuple, Union
 
 from . import _raptors as _core
+from .threading import (
+    AdaptiveThreshold,
+    LastEvent,
+    ThreadingDiagnostics,
+    threading_info,
+)
 
 RustArray = _core.RustArray
 RustArrayF32 = _core.RustArrayF32
@@ -37,6 +43,10 @@ __all__ = [
     "__version__",
     "__author__",
     "__github__",
+    "threading_info",
+    "ThreadingDiagnostics",
+    "AdaptiveThreshold",
+    "LastEvent",
 ]
 
 __version__ = getattr(_core, "__version__", "0.0.2")

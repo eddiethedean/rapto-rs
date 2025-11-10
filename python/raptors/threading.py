@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+from . import _raptors as _core
+
+
+@dataclass(frozen=True)
+class AdaptiveThreshold:
+    dtype: str
+    baseline_cutover: int
+    recommended_cutover: Optional[int]
+    median_elements_per_ms: float
+    sample_count: int
+    samples: List[float]
+    target_latency_ms: float
+
+
+@dataclass(frozen=True)
+class LastEvent:
+    dtype: str
+    elements: int
+    duration_ms: float
+    tiles_processed: int
+    partial_buffer: int
+    parallel: bool
+    operation: str
+
+
+@dataclass(frozen=True)
+class ThreadingDiagnostics:
+    parallel_min_elements: int
+    baseline_cutovers: Dict[str, int]
+    dimension_thresholds: Dict[str, List[int]]
+    thread_pool: Optional[Dict[str, int]]
+    adaptive_thresholds: Dict[str, AdaptiveThreshold]
+    last_event: Optional[LastEvent]
+
+
+def _coerce_int_map(payload) -> Dict[str, int]:
+    return {str(key): int(value) for key, value in (payload or {}).items()}
+
+
+def _coerce_pool(payload) -> Optional[Dict[str, int]]:
+    if not isinstance(payload, dict):
+        return None
+    return {str(key): int(value) for key, value in payload.items()}
+
+
+def _coerce_dim_map(payload) -> Dict[str, List[int]]:
+    dim_map: Dict[str, List[int]] = {}
+    for key, values in (payload or {}).items():
+        coerced = [int(component) for component in values]
+        dim_map[str(key)] = coerced
+    return dim_map
+
+
+def _build_adaptive_thresholds(payload) -> Dict[str, AdaptiveThreshold]:
+    result: Dict[str, AdaptiveThreshold] = {}
+    for dtype, details in (payload or {}).items():
+        samples = [float(value) for value in details.get("samples", [])]
+        recommended = details.get("recommended_cutover")
+        result[str(dtype)] = AdaptiveThreshold(
+            dtype=str(dtype),
+            baseline_cutover=int(details.get("baseline_cutover", 0)),
+            recommended_cutover=int(recommended) if recommended is not None else None,
+            median_elements_per_ms=float(details.get("median_elements_per_ms", 0.0)),
+            sample_count=int(details.get("sample_count", 0)),
+            samples=samples,
+            target_latency_ms=float(details.get("target_latency_ms", 0.0)),
+        )
+    return result
+
+
+def _build_last_event(payload) -> Optional[LastEvent]:
+    if not isinstance(payload, dict):
+        return None
+    return LastEvent(
+        dtype=str(payload.get("dtype", "")),
+        elements=int(payload.get("elements", 0)),
+        duration_ms=float(payload.get("duration_ms", 0.0)),
+        tiles_processed=int(payload.get("tiles_processed", 0)),
+        partial_buffer=int(payload.get("partial_buffer", 0)),
+        parallel=bool(payload.get("parallel", False)),
+        operation=str(payload.get("operation", "")),
+    )
+
+
+def threading_info() -> ThreadingDiagnostics:
+    """Return live diagnostics for Raptors' adaptive threading heuristics."""
+
+    raw = _core.threading_info()
+    return ThreadingDiagnostics(
+        parallel_min_elements=int(raw.get("parallel_min_elements", 0)),
+        baseline_cutovers=_coerce_int_map(raw.get("baseline_cutovers")),
+        dimension_thresholds=_coerce_dim_map(raw.get("dimension_thresholds")),
+        thread_pool=_coerce_pool(raw.get("thread_pool")),
+        adaptive_thresholds=_build_adaptive_thresholds(raw.get("adaptive_thresholds")),
+        last_event=_build_last_event(raw.get("last_event")),
+    )
+

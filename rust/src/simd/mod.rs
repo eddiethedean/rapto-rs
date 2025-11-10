@@ -1,6 +1,221 @@
 #![allow(dead_code)]
 
 #[cfg(target_arch = "x86_64")]
+pub fn reduce_sum_f64(input: &[f64], accumulators: usize) -> Option<f64> {
+    if std::arch::is_x86_feature_detected!("avx512f") {
+        return Some(unsafe { x86::avx512::reduce_sum_f64(input, accumulators) });
+    }
+    if std::arch::is_x86_feature_detected!("avx2") {
+        return Some(unsafe { x86::reduce_sum_f64(input, accumulators) });
+    }
+    None
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn reduce_sum_f64(input: &[f64], accumulators: usize) -> Option<f64> {
+    let _ = accumulators;
+    Some(unsafe { neon::reduce_sum_f64(input) })
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub fn reduce_sum_f64(input: &[f64], accumulators: usize) -> Option<f64> {
+    let _ = (input, accumulators);
+    None
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn reduce_sum_f32(input: &[f32], accumulators: usize) -> Option<f64> {
+    if std::arch::is_x86_feature_detected!("avx2") {
+        return Some(unsafe { x86::reduce_sum_f32(input, accumulators) });
+    }
+    None
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn reduce_sum_f32(input: &[f32], accumulators: usize) -> Option<f64> {
+    let _ = accumulators;
+    Some(unsafe { neon::reduce_sum_f32(input) })
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub fn reduce_sum_f32(input: &[f32], accumulators: usize) -> Option<f64> {
+    let _ = (input, accumulators);
+    None
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn add_column_broadcast_f64(
+    input: &[f64],
+    col_values: &[f64],
+    rows: usize,
+    cols: usize,
+    out: &mut [f64],
+) -> bool {
+    if input.len() != rows * cols || input.len() != out.len() || col_values.len() != rows {
+        return false;
+    }
+    if std::arch::is_x86_feature_detected!("avx512f") {
+        unsafe {
+            x86::avx512::add_columnar_f64(input, col_values, rows, cols, out);
+        }
+        return true;
+    }
+    if std::arch::is_x86_feature_detected!("avx2") {
+        unsafe {
+            x86::add_columnar_f64(input, col_values, rows, cols, out);
+        }
+        return true;
+    }
+    false
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn add_column_broadcast_f64(
+    input: &[f64],
+    col_values: &[f64],
+    rows: usize,
+    cols: usize,
+    out: &mut [f64],
+) -> bool {
+    if input.len() != rows * cols || input.len() != out.len() || col_values.len() != rows {
+        return false;
+    }
+    unsafe {
+        neon::add_columnar_f64(input, col_values, rows, cols, out);
+    }
+    true
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub fn add_column_broadcast_f64(
+    input: &[f64],
+    col_values: &[f64],
+    rows: usize,
+    cols: usize,
+    out: &mut [f64],
+) -> bool {
+    let _ = (input, col_values, rows, cols, out);
+    false
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn add_column_broadcast_f32(
+    input: &[f32],
+    col_values: &[f32],
+    rows: usize,
+    cols: usize,
+    out: &mut [f32],
+) -> bool {
+    if input.len() != rows * cols || input.len() != out.len() || col_values.len() != rows {
+        return false;
+    }
+    if std::arch::is_x86_feature_detected!("avx2") {
+        unsafe {
+            x86::add_columnar_f32(input, col_values, rows, cols, out);
+        }
+        return true;
+    }
+    false
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn add_column_broadcast_f32(
+    input: &[f32],
+    col_values: &[f32],
+    rows: usize,
+    cols: usize,
+    out: &mut [f32],
+) -> bool {
+    if input.len() != rows * cols || input.len() != out.len() || col_values.len() != rows {
+        return false;
+    }
+    unsafe {
+        neon::add_columnar_f32(input, col_values, rows, cols, out);
+    }
+    true
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub fn add_column_broadcast_f32(
+    input: &[f32],
+    col_values: &[f32],
+    rows: usize,
+    cols: usize,
+    out: &mut [f32],
+) -> bool {
+    let _ = (input, col_values, rows, cols, out);
+    false
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn add_assign_inplace_f64(acc: &mut [f64], row: &[f64]) -> bool {
+    if acc.len() != row.len() {
+        return false;
+    }
+    if std::arch::is_x86_feature_detected!("avx512f") {
+        unsafe {
+            x86::avx512::add_assign_inplace_f64(acc, row);
+        }
+        return true;
+    }
+    if std::arch::is_x86_feature_detected!("avx2") {
+        unsafe {
+            x86::add_assign_inplace_f64(acc, row);
+        }
+        return true;
+    }
+    false
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn add_assign_inplace_f64(acc: &mut [f64], row: &[f64]) -> bool {
+    if acc.len() != row.len() {
+        return false;
+    }
+    unsafe {
+        neon::add_assign_inplace_f64(acc, row);
+    }
+    true
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub fn add_assign_inplace_f64(acc: &mut [f64], row: &[f64]) -> bool {
+    let _ = (acc, row);
+    false
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn add_assign_inplace_f32(acc: &mut [f32], row: &[f32]) -> bool {
+    if acc.len() != row.len() {
+        return false;
+    }
+    if std::arch::is_x86_feature_detected!("avx2") {
+        unsafe {
+            x86::add_assign_inplace_f32(acc, row);
+        }
+        return true;
+    }
+    false
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn add_assign_inplace_f32(acc: &mut [f32], row: &[f32]) -> bool {
+    if acc.len() != row.len() {
+        return false;
+    }
+    unsafe {
+        neon::add_assign_inplace_f32(acc, row);
+    }
+    true
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub fn add_assign_inplace_f32(acc: &mut [f32], row: &[f32]) -> bool {
+    let _ = (acc, row);
+    false
+}
+
+#[cfg(target_arch = "x86_64")]
 pub fn add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) -> bool {
     if lhs.len() != rhs.len() || lhs.len() != out.len() {
         return false;
@@ -210,11 +425,143 @@ mod x86 {
 
     const LANES_F64: usize = 4;
     const LANES_F32: usize = 8;
+    const MAX_ACCUMULATORS_F64: usize = 6;
+    const MAX_ACCUMULATORS_F32: usize = 8;
+
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn reduce_sum_f64(input: &[f64], accumulators: usize) -> f64 {
+        let len = input.len();
+        if len == 0 {
+            return 0.0;
+        }
+
+        let acc_count = accumulators.clamp(1, MAX_ACCUMULATORS_F64);
+        let mut regs = [_mm256_setzero_pd(); MAX_ACCUMULATORS_F64];
+        let mut index = 0usize;
+        let step = acc_count * LANES_F64;
+
+        while index + step <= len {
+            let mut offset = index;
+            for slot in 0..acc_count {
+                let vec = _mm256_loadu_pd(input.as_ptr().add(offset));
+                regs[slot] = _mm256_add_pd(regs[slot], vec);
+                offset += LANES_F64;
+            }
+            index += step;
+        }
+
+        let mut carry = _mm256_setzero_pd();
+        while index + LANES_F64 <= len {
+            let vec = _mm256_loadu_pd(input.as_ptr().add(index));
+            carry = _mm256_add_pd(carry, vec);
+            index += LANES_F64;
+        }
+        regs[0] = _mm256_add_pd(regs[0], carry);
+
+        let mut total = 0.0;
+        for slot in 0..acc_count {
+            let mut buf = [0.0f64; LANES_F64];
+            _mm256_storeu_pd(buf.as_mut_ptr(), regs[slot]);
+            total += buf.iter().sum::<f64>();
+        }
+        while index < len {
+            total += *input.get_unchecked(index);
+            index += 1;
+        }
+        total
+    }
+
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn reduce_sum_f32(input: &[f32], accumulators: usize) -> f64 {
+        let len = input.len();
+        if len == 0 {
+            return 0.0;
+        }
+
+        let acc_count = accumulators.clamp(1, MAX_ACCUMULATORS_F32);
+        let mut regs = [_mm256_setzero_ps(); MAX_ACCUMULATORS_F32];
+        let mut index = 0usize;
+        let step = acc_count * LANES_F32;
+
+        while index + step <= len {
+            let mut offset = index;
+            for slot in 0..acc_count {
+                let vec = _mm256_loadu_ps(input.as_ptr().add(offset));
+                regs[slot] = _mm256_add_ps(regs[slot], vec);
+                offset += LANES_F32;
+            }
+            index += step;
+        }
+
+        let mut carry = _mm256_setzero_ps();
+        while index + LANES_F32 <= len {
+            let vec = _mm256_loadu_ps(input.as_ptr().add(index));
+            carry = _mm256_add_ps(carry, vec);
+            index += LANES_F32;
+        }
+        regs[0] = _mm256_add_ps(regs[0], carry);
+
+        let mut total = 0.0f64;
+        for slot in 0..acc_count {
+            let mut buf = [0.0f32; LANES_F32];
+            _mm256_storeu_ps(buf.as_mut_ptr(), regs[slot]);
+            total += buf.iter().map(|&v| v as f64).sum::<f64>();
+        }
+        while index < len {
+            total += *input.get_unchecked(index) as f64;
+            index += 1;
+        }
+        total
+    }
 
     pub(crate) mod avx512 {
         use super::*;
 
         const LANES: usize = 8;
+        const MAX_ACCUMULATORS: usize = 8;
+
+        #[target_feature(enable = "avx512f")]
+        pub unsafe fn reduce_sum_f64(input: &[f64], accumulators: usize) -> f64 {
+            let len = input.len();
+            if len == 0 {
+                return 0.0;
+            }
+
+            let acc_count = accumulators.clamp(1, MAX_ACCUMULATORS);
+            let mut regs = [_mm512_setzero_pd(); MAX_ACCUMULATORS];
+            let mut index = 0usize;
+            let step = acc_count * LANES;
+
+            while index + step <= len {
+                let mut offset = index;
+                for slot in 0..acc_count {
+                    let vec = _mm512_loadu_pd(input.as_ptr().add(offset));
+                    regs[slot] = _mm512_add_pd(regs[slot], vec);
+                    offset += LANES;
+                }
+                index += step;
+            }
+
+            let mut carry = _mm512_setzero_pd();
+            while index + LANES <= len {
+                let vec = _mm512_loadu_pd(input.as_ptr().add(index));
+                carry = _mm512_add_pd(carry, vec);
+                index += LANES;
+            }
+            regs[0] = _mm512_add_pd(regs[0], carry);
+
+            let mut total = 0.0;
+            for slot in 0..acc_count {
+                let mut buf = [0.0f64; LANES];
+                _mm512_storeu_pd(buf.as_mut_ptr(), regs[slot]);
+                total += buf.iter().sum::<f64>();
+            }
+            while index < len {
+                total += *input.get_unchecked(index);
+                index += 1;
+            }
+            total
+        }
 
         #[target_feature(enable = "avx512f")]
         pub unsafe fn add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) {
@@ -263,6 +610,51 @@ mod x86 {
             }
             while i < len {
                 *out.get_unchecked_mut(i) = input.get_unchecked(i) * factor;
+                i += 1;
+            }
+        }
+
+        #[target_feature(enable = "avx512f")]
+        pub unsafe fn add_columnar_f64(
+            input: &[f64],
+            col_values: &[f64],
+            rows: usize,
+            cols: usize,
+            out: &mut [f64],
+        ) {
+            for row in 0..rows {
+                let scalar = *col_values.get_unchecked(row);
+                let scalar_v = _mm512_set1_pd(scalar);
+                let base = row * cols;
+                let mut col = 0usize;
+                while col + LANES <= cols {
+                    let offset = base + col;
+                    let a = _mm512_loadu_pd(input.as_ptr().add(offset));
+                    let c = _mm512_add_pd(a, scalar_v);
+                    _mm512_storeu_pd(out.as_mut_ptr().add(offset), c);
+                    col += LANES;
+                }
+                while col < cols {
+                    let offset = base + col;
+                    *out.get_unchecked_mut(offset) = *input.get_unchecked(offset) + scalar;
+                    col += 1;
+                }
+            }
+        }
+
+        #[target_feature(enable = "avx512f")]
+        pub unsafe fn add_assign_inplace_f64(acc: &mut [f64], row: &[f64]) {
+            let len = acc.len();
+            let mut i = 0usize;
+            while i + LANES <= len {
+                let a = _mm512_loadu_pd(acc.as_ptr().add(i));
+                let b = _mm512_loadu_pd(row.as_ptr().add(i));
+                let c = _mm512_add_pd(a, b);
+                _mm512_storeu_pd(acc.as_mut_ptr().add(i), c);
+                i += LANES;
+            }
+            while i < len {
+                *acc.get_unchecked_mut(i) += *row.get_unchecked(i);
                 i += 1;
             }
         }
@@ -395,6 +787,96 @@ mod x86 {
             i += 1;
         }
     }
+
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn add_columnar_f64(
+        input: &[f64],
+        col_values: &[f64],
+        rows: usize,
+        cols: usize,
+        out: &mut [f64],
+    ) {
+        for row in 0..rows {
+            let scalar = *col_values.get_unchecked(row);
+            let scalar_v = _mm256_set1_pd(scalar);
+            let base = row * cols;
+            let mut col = 0usize;
+            while col + LANES_F64 <= cols {
+                let offset = base + col;
+                let a = _mm256_loadu_pd(input.as_ptr().add(offset));
+                let c = _mm256_add_pd(a, scalar_v);
+                _mm256_storeu_pd(out.as_mut_ptr().add(offset), c);
+                col += LANES_F64;
+            }
+            while col < cols {
+                let offset = base + col;
+                *out.get_unchecked_mut(offset) = *input.get_unchecked(offset) + scalar;
+                col += 1;
+            }
+        }
+    }
+
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn add_columnar_f32(
+        input: &[f32],
+        col_values: &[f32],
+        rows: usize,
+        cols: usize,
+        out: &mut [f32],
+    ) {
+        for row in 0..rows {
+            let scalar = *col_values.get_unchecked(row);
+            let scalar_v = _mm256_set1_ps(scalar);
+            let base = row * cols;
+            let mut col = 0usize;
+            while col + LANES_F32 <= cols {
+                let offset = base + col;
+                let a = _mm256_loadu_ps(input.as_ptr().add(offset));
+                let c = _mm256_add_ps(a, scalar_v);
+                _mm256_storeu_ps(out.as_mut_ptr().add(offset), c);
+                col += LANES_F32;
+            }
+            while col < cols {
+                let offset = base + col;
+                *out.get_unchecked_mut(offset) = *input.get_unchecked(offset) + scalar;
+                col += 1;
+            }
+        }
+    }
+
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn add_assign_inplace_f64(acc: &mut [f64], row: &[f64]) {
+        let len = acc.len();
+        let mut i = 0usize;
+        while i + LANES_F64 <= len {
+            let a = _mm256_loadu_pd(acc.as_ptr().add(i));
+            let b = _mm256_loadu_pd(row.as_ptr().add(i));
+            let c = _mm256_add_pd(a, b);
+            _mm256_storeu_pd(acc.as_mut_ptr().add(i), c);
+            i += LANES_F64;
+        }
+        while i < len {
+            *acc.get_unchecked_mut(i) += *row.get_unchecked(i);
+            i += 1;
+        }
+    }
+
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn add_assign_inplace_f32(acc: &mut [f32], row: &[f32]) {
+        let len = acc.len();
+        let mut i = 0usize;
+        while i + LANES_F32 <= len {
+            let a = _mm256_loadu_ps(acc.as_ptr().add(i));
+            let b = _mm256_loadu_ps(row.as_ptr().add(i));
+            let c = _mm256_add_ps(a, b);
+            _mm256_storeu_ps(acc.as_mut_ptr().add(i), c);
+            i += LANES_F32;
+        }
+        while i < len {
+            *acc.get_unchecked_mut(i) += *row.get_unchecked(i);
+            i += 1;
+        }
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -403,6 +885,72 @@ mod neon {
 
     const LANES_F64: usize = 2;
     const LANES_F32: usize = 4;
+
+    #[target_feature(enable = "neon")]
+    pub unsafe fn reduce_sum_f64(input: &[f64]) -> f64 {
+        let len = input.len();
+        if len == 0 {
+            return 0.0;
+        }
+
+        let mut acc0 = vdupq_n_f64(0.0);
+        let mut acc1 = vdupq_n_f64(0.0);
+        let mut index = 0usize;
+        let ptr = input.as_ptr();
+
+        while index + (LANES_F64 * 2) <= len {
+            let a = vld1q_f64(ptr.add(index));
+            let b = vld1q_f64(ptr.add(index + LANES_F64));
+            acc0 = vaddq_f64(acc0, a);
+            acc1 = vaddq_f64(acc1, b);
+            index += LANES_F64 * 2;
+        }
+        if index + LANES_F64 <= len {
+            let a = vld1q_f64(ptr.add(index));
+            acc0 = vaddq_f64(acc0, a);
+            index += LANES_F64;
+        }
+
+        let mut total = vaddvq_f64(acc0) + vaddvq_f64(acc1);
+        while index < len {
+            total += *ptr.add(index);
+            index += 1;
+        }
+        total
+    }
+
+    #[target_feature(enable = "neon")]
+    pub unsafe fn reduce_sum_f32(input: &[f32]) -> f64 {
+        let len = input.len();
+        if len == 0 {
+            return 0.0;
+        }
+
+        let mut acc0 = vdupq_n_f32(0.0);
+        let mut acc1 = vdupq_n_f32(0.0);
+        let mut index = 0usize;
+        let ptr = input.as_ptr();
+
+        while index + (LANES_F32 * 2) <= len {
+            let a = vld1q_f32(ptr.add(index));
+            let b = vld1q_f32(ptr.add(index + LANES_F32));
+            acc0 = vaddq_f32(acc0, a);
+            acc1 = vaddq_f32(acc1, b);
+            index += LANES_F32 * 2;
+        }
+        if index + LANES_F32 <= len {
+            let a = vld1q_f32(ptr.add(index));
+            acc0 = vaddq_f32(acc0, a);
+            index += LANES_F32;
+        }
+
+        let mut total = vaddvq_f32(acc0) as f64 + vaddvq_f32(acc1) as f64;
+        while index < len {
+            total += *ptr.add(index) as f64;
+            index += 1;
+        }
+        total
+    }
 
     #[target_feature(enable = "neon")]
     pub unsafe fn add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) {
@@ -528,6 +1076,96 @@ mod neon {
 
         while i < len {
             *ptr_out.add(i) = *ptr_in.add(i) * factor;
+            i += 1;
+        }
+    }
+
+    #[target_feature(enable = "neon")]
+    pub unsafe fn add_columnar_f64(
+        input: &[f64],
+        col_values: &[f64],
+        rows: usize,
+        cols: usize,
+        out: &mut [f64],
+    ) {
+        for row in 0..rows {
+            let scalar = *col_values.get_unchecked(row);
+            let scalar_v = vdupq_n_f64(scalar);
+            let base = row * cols;
+            let mut col = 0usize;
+            while col + LANES_F64 <= cols {
+                let offset = base + col;
+                let a = vld1q_f64(input.as_ptr().add(offset));
+                let c = vaddq_f64(a, scalar_v);
+                vst1q_f64(out.as_mut_ptr().add(offset), c);
+                col += LANES_F64;
+            }
+            while col < cols {
+                let offset = base + col;
+                *out.get_unchecked_mut(offset) = *input.get_unchecked(offset) + scalar;
+                col += 1;
+            }
+        }
+    }
+
+    #[target_feature(enable = "neon")]
+    pub unsafe fn add_columnar_f32(
+        input: &[f32],
+        col_values: &[f32],
+        rows: usize,
+        cols: usize,
+        out: &mut [f32],
+    ) {
+        for row in 0..rows {
+            let scalar = *col_values.get_unchecked(row);
+            let scalar_v = vdupq_n_f32(scalar);
+            let base = row * cols;
+            let mut col = 0usize;
+            while col + LANES_F32 <= cols {
+                let offset = base + col;
+                let a = vld1q_f32(input.as_ptr().add(offset));
+                let c = vaddq_f32(a, scalar_v);
+                vst1q_f32(out.as_mut_ptr().add(offset), c);
+                col += LANES_F32;
+            }
+            while col < cols {
+                let offset = base + col;
+                *out.get_unchecked_mut(offset) = *input.get_unchecked(offset) + scalar;
+                col += 1;
+            }
+        }
+    }
+
+    #[target_feature(enable = "neon")]
+    pub unsafe fn add_assign_inplace_f64(acc: &mut [f64], row: &[f64]) {
+        let len = acc.len();
+        let mut i = 0usize;
+        while i + LANES_F64 <= len {
+            let a = vld1q_f64(acc.as_ptr().add(i));
+            let b = vld1q_f64(row.as_ptr().add(i));
+            let c = vaddq_f64(a, b);
+            vst1q_f64(acc.as_mut_ptr().add(i), c);
+            i += LANES_F64;
+        }
+        while i < len {
+            *acc.get_unchecked_mut(i) += *row.get_unchecked(i);
+            i += 1;
+        }
+    }
+
+    #[target_feature(enable = "neon")]
+    pub unsafe fn add_assign_inplace_f32(acc: &mut [f32], row: &[f32]) {
+        let len = acc.len();
+        let mut i = 0usize;
+        while i + LANES_F32 <= len {
+            let a = vld1q_f32(acc.as_ptr().add(i));
+            let b = vld1q_f32(row.as_ptr().add(i));
+            let c = vaddq_f32(a, b);
+            vst1q_f32(acc.as_mut_ptr().add(i), c);
+            i += LANES_F32;
+        }
+        while i < len {
+            *acc.get_unchecked_mut(i) += *row.get_unchecked(i);
             i += 1;
         }
     }

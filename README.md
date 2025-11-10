@@ -1,6 +1,7 @@
 # Raptors
 
-Rust-powered, NumPy-compatible Python array library scaffolding.
+Rust-powered, NumPy-compatible Python array library scaffolding. The project
+name expands to **Rust Accelerated Parallel Tensor Operations (`rapto-rs`)**.
 
 > **Current release:** `0.0.2`
 
@@ -79,6 +80,7 @@ assert alias.to_list()[4] == 99.0
 - Check whether the vectorized kernels are active via `raptors.simd_enabled()`.
 - Force-disable or force-enable SIMD at import time with `RAPTORS_SIMD=0` or `RAPTORS_SIMD=1`.
 - Control the Rayon pool used for large 2-D workloads with `RAPTORS_THREADS=<N>` (values ≤1 fall back to single-threaded execution).
+- Inspect adaptive thresholds, last operation timings, and pool sizing with `raptors.threading_info()`.
 - Contiguous elementwise add/scale and row/column broadcasts now use the SIMD path, and large matrices fan out across threads automatically.
 - The benchmarking helper accepts presets and JSON export for repeatable runs:
 
@@ -88,18 +90,19 @@ assert alias.to_list()[4] == 99.0
   PYTHONPATH=python ./scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float64 --simd-mode disable
 
   # Run the 2-D suite and capture results for dashboards
-  PYTHONPATH=python ./scripts/compare_numpy_raptors.py --suite 2d --simd-mode auto --output-json results.json
+  PYTHONPATH=python ./scripts/compare_numpy_raptors.py --suite 2d --simd-mode force \
+      --warmup 1 --repeats 7 --output-json results.json
 
-  # Guard against regressions in CI using baseline thresholds
-  PYTHONPATH=python ./scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float64 \
-      --operations mean mean_axis0 mean_axis1 broadcast_add \
-      --validate-json benchmarks/baselines/2d_float64.json --validate-slack 1.0
+  # Guard against regressions in CI using baseline thresholds (float64 example)
+  PYTHONPATH=python ./scripts/compare_numpy_raptors.py --suite 2d --simd-mode force \
+      --warmup 1 --repeats 7 \
+      --validate-json benchmarks/baselines/2d_float64.json --validate-slack 0.05
   ```
 
 ## Continuous Integration
 
-The `.github/workflows/build-wheels.yml` workflow builds and tests wheels across
-Ubuntu, macOS, and Windows for Python 3.9–3.12 using `maturin`. Successful runs
-upload ready-to-use wheel artifacts and exercise the Python bindings via
-`pytest`.
+CI currently consists of two entry points:
+
+- `ci/github-actions.yml` — linting, unit tests, and Rust/Python checks.
+- `.github/workflows/bench.yml` — scheduled benchmark validation against the JSON targets in `benchmarks/baselines/`, producing JSON artefacts for historical tracking.
 
