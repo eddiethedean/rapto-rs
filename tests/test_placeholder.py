@@ -25,7 +25,6 @@ def test_elementwise_addition_and_length_validation():
     result = lhs.add(rhs)
     assert result.to_list() == [5.0, 7.0, 9.0]
 
-    # Broadcasting with a scalar-like 1-element array works
     broadcasted = lhs.add(raptors.array([1.0]))
     assert broadcasted.to_list() == [2.0, 3.0, 4.0]
 
@@ -132,4 +131,63 @@ def test_numpy_roundtrip_2d():
     back = raptors.to_numpy(arr)
     assert back.shape == (2, 2)
     assert np.allclose(back, matrix)
+
+
+def test_float32_arrays():
+    np = pytest.importorskip("numpy")
+
+    arr = raptors.array([1, 2, 3], dtype="float32")
+    assert isinstance(arr, raptors.RustArrayF32)
+    assert [round(v, 6) for v in arr.to_list()] == [1.0, 2.0, 3.0]
+
+    zeros = raptors.zeros((2, 2), dtype="float32")
+    assert isinstance(zeros, raptors.RustArrayF32)
+    assert zeros.shape == [2, 2]
+
+    back = raptors.to_numpy(arr)
+    assert back.dtype == np.float32
+    assert np.allclose(back, np.array([1, 2, 3], dtype=np.float32))
+
+
+def test_int32_arrays_and_scale():
+    arr = raptors.array([1, 2, 3], dtype="int32")
+    assert isinstance(arr, raptors.RustArrayI32)
+    assert arr.to_list() == [1, 2, 3]
+
+    scaled = arr.scale(2.0)
+    assert scaled.to_list() == [2, 4, 6]
+
+    with pytest.raises(ValueError):
+        arr.scale(0.5)
+
+
+def test_int32_means_raise_for_fractional_results():
+    arr = raptors.array([1, 2], dtype="int32")
+    assert math.isclose(arr.mean(), 1.5)
+    with pytest.raises(ValueError):
+        arr.mean_axis(0)
+
+
+def test_broadcast_add_float32():
+    lhs = raptors.array([[1.0, 2.0], [3.0, 4.0]], dtype="float32")
+    rhs = raptors.array([10.0, 20.0], dtype="float32")
+    out = raptors.broadcast_add(lhs, rhs)
+    assert isinstance(out, raptors.RustArrayF32)
+    assert out.shape == [2, 2]
+    assert [round(v, 3) for v in out.to_list()] == [11.0, 22.0, 13.0, 24.0]
+
+
+def test_from_numpy_dtype_dispatch():
+    np = pytest.importorskip("numpy")
+
+    f32_matrix = np.array([[1.0, 2.0]], dtype=np.float32)
+    i32_matrix = np.array([[1, 2, 3]], dtype=np.int32)
+
+    arr_f32 = raptors.from_numpy(f32_matrix)
+    assert isinstance(arr_f32, raptors.RustArrayF32)
+    arr_i32 = raptors.from_numpy(i32_matrix)
+    assert isinstance(arr_i32, raptors.RustArrayI32)
+
+    with pytest.raises(TypeError):
+        raptors.from_numpy(np.array([1, 2, 3], dtype=np.int64))
 

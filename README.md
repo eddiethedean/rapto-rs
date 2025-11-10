@@ -12,7 +12,7 @@ Matthews (`odosmatthews@gmail.com`, GitHub: `eddiethedean`).
 
 ### Layout
 
-- `rust/`: Rust crate exposing core functionality via `pyo3`.
+- `rust/`: Rust crate exposing core functionality via `pyo3` (with float64, float32, and int32 array wrappers).
 - `python/`: Python package wrapper publishing the `raptors` module.
 - `tests/`: pytest-based test suite comparing behavior to NumPy.
 - `benches/`: Benchmark harnesses for performance tracking.
@@ -37,11 +37,11 @@ maturin build --release
 ```python
 import raptors
 
-# Construct 1-D and 2-D arrays from Python iterables or helper constructors.
-row = raptors.array([1.0, 2.0, 3.0])
+# Construct arrays from Python iterables or helper constructors.
+row = raptors.array([1.0, 2.0, 3.0])  # float64 by default
 matrix = raptors.array2d([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-zeros = raptors.zeros((2, 3))
-ones = raptors.ones(3)
+zeros32 = raptors.zeros((2, 3), dtype="float32")
+ints = raptors.ones(3, dtype="int32")
 
 # Run elementwise math and reductions across dimensions.
 scaled = matrix.add(raptors.array2d([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]])).scale(0.5)
@@ -49,8 +49,12 @@ total = scaled.sum()
 col_sums = scaled.sum_axis(0)
 row_means = scaled.mean_axis(1)
 
+# Use dtype-aware broadcasting helpers.
+broadcasted = raptors.broadcast_add(matrix, row)
+f32_sum = raptors.broadcast_add(zeros32, raptors.array([1.0, 2.0, 3.0], dtype="float32"))
+
 # Interoperate with NumPy (requires numpy) without leaving Python.
-import numpy as np
+import numpy as np  # type: ignore
 
 numpy_view = raptors.to_numpy(matrix)
 assert numpy_view.shape == (2, 3)
