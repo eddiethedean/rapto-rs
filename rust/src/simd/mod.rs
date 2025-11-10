@@ -5,6 +5,12 @@ pub fn add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) -> bool {
     if lhs.len() != rhs.len() || lhs.len() != out.len() {
         return false;
     }
+    if std::arch::is_x86_feature_detected!("avx512f") {
+        unsafe {
+            x86::avx512::add_same_shape_f64(lhs, rhs, out);
+        }
+        return true;
+    }
     if std::arch::is_x86_feature_detected!("avx2") {
         unsafe {
             x86::add_same_shape_f64(lhs, rhs, out);
@@ -67,6 +73,12 @@ pub fn add_row_scalar_f64(input: &[f64], scalar: f64, out: &mut [f64]) -> bool {
     if input.len() != out.len() {
         return false;
     }
+    if std::arch::is_x86_feature_detected!("avx512f") {
+        unsafe {
+            x86::avx512::add_row_scalar_f64(input, scalar, out);
+        }
+        return true;
+    }
     if std::arch::is_x86_feature_detected!("avx2") {
         unsafe {
             x86::add_row_scalar_f64(input, scalar, out);
@@ -128,6 +140,12 @@ pub fn add_row_scalar_f32(input: &[f32], scalar: f32, out: &mut [f32]) -> bool {
 pub fn scale_same_shape_f64(input: &[f64], factor: f64, out: &mut [f64]) -> bool {
     if input.len() != out.len() {
         return false;
+    }
+    if std::arch::is_x86_feature_detected!("avx512f") {
+        unsafe {
+            x86::avx512::scale_same_shape_f64(input, factor, out);
+        }
+        return true;
     }
     if std::arch::is_x86_feature_detected!("avx2") {
         unsafe {
@@ -192,6 +210,63 @@ mod x86 {
 
     const LANES_F64: usize = 4;
     const LANES_F32: usize = 8;
+
+    pub(crate) mod avx512 {
+        use super::*;
+
+        const LANES: usize = 8;
+
+        #[target_feature(enable = "avx512f")]
+        pub unsafe fn add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) {
+            let len = lhs.len();
+            let mut i = 0usize;
+            while i + LANES <= len {
+                let a = _mm512_loadu_pd(lhs.as_ptr().add(i));
+                let b = _mm512_loadu_pd(rhs.as_ptr().add(i));
+                let c = _mm512_add_pd(a, b);
+                _mm512_storeu_pd(out.as_mut_ptr().add(i), c);
+                i += LANES;
+            }
+            while i < len {
+                *out.get_unchecked_mut(i) = lhs.get_unchecked(i) + rhs.get_unchecked(i);
+                i += 1;
+            }
+        }
+
+        #[target_feature(enable = "avx512f")]
+        pub unsafe fn add_row_scalar_f64(input: &[f64], scalar: f64, out: &mut [f64]) {
+            let len = input.len();
+            let scalar_v = _mm512_set1_pd(scalar);
+            let mut i = 0usize;
+            while i + LANES <= len {
+                let a = _mm512_loadu_pd(input.as_ptr().add(i));
+                let c = _mm512_add_pd(a, scalar_v);
+                _mm512_storeu_pd(out.as_mut_ptr().add(i), c);
+                i += LANES;
+            }
+            while i < len {
+                *out.get_unchecked_mut(i) = input.get_unchecked(i) + scalar;
+                i += 1;
+            }
+        }
+
+        #[target_feature(enable = "avx512f")]
+        pub unsafe fn scale_same_shape_f64(input: &[f64], factor: f64, out: &mut [f64]) {
+            let len = input.len();
+            let factor_v = _mm512_set1_pd(factor);
+            let mut i = 0usize;
+            while i + LANES <= len {
+                let a = _mm512_loadu_pd(input.as_ptr().add(i));
+                let c = _mm512_mul_pd(a, factor_v);
+                _mm512_storeu_pd(out.as_mut_ptr().add(i), c);
+                i += LANES;
+            }
+            while i < len {
+                *out.get_unchecked_mut(i) = input.get_unchecked(i) * factor;
+                i += 1;
+            }
+        }
+    }
 
     #[target_feature(enable = "avx2")]
     pub unsafe fn add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) {

@@ -123,6 +123,20 @@ where
     }
 }
 
+#[inline]
+fn add_assign_f64(acc: &mut [f64], row: &[f64]) {
+    for (dst, &value) in acc.iter_mut().zip(row.iter()) {
+        *dst += value;
+    }
+}
+
+#[inline]
+fn add_assign_f64_from_f32(acc: &mut [f64], row: &[f32]) {
+    for (dst, &value) in acc.iter_mut().zip(row.iter()) {
+        *dst += value as f64;
+    }
+}
+
 impl NumericElement for f64 {
     const DTYPE_NAME: &'static str = "float64";
     const SUPPORTS_FRACTIONS: bool = true;
@@ -884,6 +898,28 @@ where
 
         match axis {
             0 => {
+                if self.is_contiguous()
+                    && (T::DTYPE_NAME == "float64" || T::DTYPE_NAME == "float32")
+                {
+                    let values = if T::DTYPE_NAME == "float64" {
+                        let data = unsafe {
+                            std::slice::from_raw_parts(
+                                self.data_slice().as_ptr() as *const f64,
+                                rows * cols,
+                            )
+                        };
+                        reduce_axis0_f64(data, rows, cols, op)
+                    } else {
+                        let data = unsafe {
+                            std::slice::from_raw_parts(
+                                self.data_slice().as_ptr() as *const f32,
+                                rows * cols,
+                            )
+                        };
+                        reduce_axis0_f32(data, rows, cols, op)
+                    };
+                    return self.convert_reduction_from_f64(values, vec![cols], op);
+                }
                 let mut out = Vec::with_capacity(cols);
                 for c in 0..cols {
                     let mut acc = 0.0;
@@ -903,6 +939,28 @@ where
                 Ok(NumericArray::new_owned(out, vec![cols]))
             }
             1 => {
+                if self.is_contiguous()
+                    && (T::DTYPE_NAME == "float64" || T::DTYPE_NAME == "float32")
+                {
+                    let values = if T::DTYPE_NAME == "float64" {
+                        let data = unsafe {
+                            std::slice::from_raw_parts(
+                                self.data_slice().as_ptr() as *const f64,
+                                rows * cols,
+                            )
+                        };
+                        reduce_axis1_f64(data, rows, cols, op)
+                    } else {
+                        let data = unsafe {
+                            std::slice::from_raw_parts(
+                                self.data_slice().as_ptr() as *const f32,
+                                rows * cols,
+                            )
+                        };
+                        reduce_axis1_f32(data, rows, cols, op)
+                    };
+                    return self.convert_reduction_from_f64(values, vec![rows], op);
+                }
                 let mut out = Vec::with_capacity(rows);
                 for r in 0..rows {
                     let base = r * row_stride;
@@ -924,8 +982,180 @@ where
             _ => unreachable!(),
         }
     }
+
+    fn convert_reduction_from_f64(
+        &self,
+        values: Vec<f64>,
+        shape: Vec<usize>,
+        op: Reduction,
+    ) -> PyResult<NumericArray<T>> {
+        let mut out = Vec::with_capacity(values.len());
+        for value in values {
+            out.push(Self::convert_from_f64(value, op)?);
+        }
+        Ok(NumericArray::new_owned(out, shape))
+    }
 }
 
+fn reduce_axis0_f64(data: &[f64], rows: usize, cols: usize, op: Reduction) -> Vec<f64> {
+    if cols == 0 || rows == 0 {
+        return vec![0.0; cols];
+    }
+    let total = rows * cols;
+    let mut sums = if total >= PARALLEL_MIN_ELEMENTS {
+        if let Some(pool) = thread_pool() {
+            pool.install(|| {
+                use rayon::prelude::*;
+                data.par_chunks(cols)
+                    .fold(
+                        || vec![0.0; cols],
+                        |mut acc, row| {
+                            add_assign_f64(&mut acc, row);
+                            acc
+                        },
+                    )
+                    .reduce(
+                        || vec![0.0; cols],
+                        |mut acc, partial| {
+                            add_assign_f64(&mut acc, &partial);
+                            acc
+                        },
+                    )
+            })
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    if sums.is_empty() {
+        sums = vec![0.0; cols];
+        for row in data.chunks(cols) {
+            add_assign_f64(&mut sums, row);
+        }
+    }
+    if matches!(op, Reduction::Mean) {
+        let inv = 1.0 / rows as f64;
+        for value in &mut sums {
+            *value *= inv;
+        }
+    }
+    sums
+}
+
+fn reduce_axis0_f32(data: &[f32], rows: usize, cols: usize, op: Reduction) -> Vec<f64> {
+    if cols == 0 || rows == 0 {
+        return vec![0.0; cols];
+    }
+    let total = rows * cols;
+    let mut sums = if total >= PARALLEL_MIN_ELEMENTS {
+        if let Some(pool) = thread_pool() {
+            pool.install(|| {
+                use rayon::prelude::*;
+                data.par_chunks(cols)
+                    .fold(
+                        || vec![0.0; cols],
+                        |mut acc, row| {
+                            add_assign_f64_from_f32(&mut acc, row);
+                            acc
+                        },
+                    )
+                    .reduce(
+                        || vec![0.0; cols],
+                        |mut acc, partial| {
+                            add_assign_f64(&mut acc, &partial);
+                            acc
+                        },
+                    )
+            })
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    if sums.is_empty() {
+        sums = vec![0.0; cols];
+        for row in data.chunks(cols) {
+            add_assign_f64_from_f32(&mut sums, row);
+        }
+    }
+    if matches!(op, Reduction::Mean) {
+        let inv = 1.0 / rows as f64;
+        for value in &mut sums {
+            *value *= inv;
+        }
+    }
+    sums
+}
+
+fn reduce_axis1_f64(data: &[f64], rows: usize, cols: usize, op: Reduction) -> Vec<f64> {
+    if rows == 0 {
+        return Vec::new();
+    }
+    let total = rows * cols;
+    let mut sums = if total >= PARALLEL_MIN_ELEMENTS {
+        if let Some(pool) = thread_pool() {
+            pool.install(|| {
+                use rayon::prelude::*;
+                data.par_chunks(cols)
+                    .map(|row| row.iter().sum::<f64>())
+                    .collect::<Vec<f64>>()
+            })
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    if sums.is_empty() {
+        sums = data
+            .chunks(cols)
+            .map(|row| row.iter().sum::<f64>())
+            .collect::<Vec<f64>>();
+    }
+    if matches!(op, Reduction::Mean) && cols > 0 {
+        let inv = 1.0 / cols as f64;
+        for value in &mut sums {
+            *value *= inv;
+        }
+    }
+    sums
+}
+
+fn reduce_axis1_f32(data: &[f32], rows: usize, cols: usize, op: Reduction) -> Vec<f64> {
+    if rows == 0 {
+        return Vec::new();
+    }
+    let total = rows * cols;
+    let mut sums = if total >= PARALLEL_MIN_ELEMENTS {
+        if let Some(pool) = thread_pool() {
+            pool.install(|| {
+                use rayon::prelude::*;
+                data.par_chunks(cols)
+                    .map(|row| row.iter().map(|&value| value as f64).sum::<f64>())
+                    .collect::<Vec<f64>>()
+            })
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    if sums.is_empty() {
+        sums = data
+            .chunks(cols)
+            .map(|row| row.iter().map(|&value| value as f64).sum::<f64>())
+            .collect::<Vec<f64>>();
+    }
+    if matches!(op, Reduction::Mean) && cols > 0 {
+        let inv = 1.0 / cols as f64;
+        for value in &mut sums {
+            *value *= inv;
+        }
+    }
+    sums
+}
 #[derive(Clone, Copy)]
 enum Reduction {
     Sum,
