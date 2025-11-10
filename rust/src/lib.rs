@@ -103,9 +103,19 @@ const PARALLEL_MIN_ELEMENTS: usize = 1 << 15;
 const ADAPTIVE_SAMPLE_WINDOW: usize = 9;
 const TRACKED_DTYPES: &[&str] = &["float64", "float32", "int32"];
 
+const SMALL_AXIS_PARALLEL_ROWS: usize = 512;
+const AXIS0_SIMD_COL_LIMIT: usize = 1024;
+const AXIS0_PAR_MIN_ROWS: usize = 64;
+const SCALE_PAR_MIN_ROWS: usize = 32;
+const BROADCAST_PAR_MIN_ROWS: usize = 48;
+const BROADCAST_PAR_MIN_COLS: usize = 64;
+const COLUMN_BROADCAST_DIRECT_MAX_ELEMS: usize = 1 << 19;
+const SCALE_PAR_MIN_ELEMS: usize = 1 << 21;
+
 #[derive(Default)]
 struct AdaptiveThreadingState {
     throughput: HashMap<&'static str, VecDeque<f64>>,
+    seq_throughput: HashMap<&'static str, VecDeque<f64>>,
     last_event: Option<ThreadingEvent>,
 }
 
@@ -119,9 +129,12 @@ struct ThreadingSnapshot {
 struct ThresholdEntry {
     dtype: &'static str,
     median_elements_per_ms: f64,
+    seq_median_elements_per_ms: f64,
     sample_count: usize,
+    seq_sample_count: usize,
     recommended_cutover: Option<usize>,
     samples: Vec<f64>,
+    seq_samples: Vec<f64>,
 }
 
 #[derive(Clone, Default)]
@@ -143,10 +156,15 @@ fn adaptive_state() -> &'static Mutex<AdaptiveThreadingState> {
 
 impl AdaptiveThreadingState {
     fn record(&mut self, event: ThreadingEvent) {
-        if event.parallel && event.duration_ms > 0.0 && event.elements > 0 {
+        if event.duration_ms > 0.0 && event.elements > 0 {
             let throughput = event.elements as f64 / event.duration_ms;
             if throughput.is_finite() && throughput > 0.0 {
-                let deque = self.throughput.entry(event.dtype).or_default();
+                let map = if event.parallel {
+                    &mut self.throughput
+                } else {
+                    &mut self.seq_throughput
+                };
+                let deque = map.entry(event.dtype).or_default();
                 if deque.len() == ADAPTIVE_SAMPLE_WINDOW {
                     deque.pop_front();
                 }
@@ -171,16 +189,37 @@ impl AdaptiveThreadingState {
         }
     }
 
+    fn median_seq(&self, dtype: &'static str) -> Option<f64> {
+        let values = self.seq_throughput.get(dtype)?;
+        if values.is_empty() {
+            return None;
+        }
+        let mut sorted = values.iter().copied().collect::<Vec<_>>();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+        let mid = sorted.len() / 2;
+        if sorted.len() % 2 == 0 && mid > 0 {
+            Some((sorted[mid - 1] + sorted[mid]) / 2.0)
+        } else {
+            Some(sorted[mid])
+        }
+    }
+
     fn recommend_cutover(&self, dtype: &'static str) -> Option<usize> {
         let median = self.median(dtype)?;
         if median <= 0.0 {
             return None;
         }
+        let seq_median = self.median_seq(dtype).unwrap_or(0.0);
+        let effective_median = if seq_median > 0.0 && seq_median >= median {
+            seq_median
+        } else {
+            median
+        };
         let target = target_latency_ms(dtype);
         if target <= 0.0 {
             return None;
         }
-        let cutover = (median * target).ceil() as usize;
+        let cutover = (effective_median * target).ceil() as usize;
         Some(cutover.max(1))
     }
 
@@ -193,13 +232,22 @@ impl AdaptiveThreadingState {
                 .map(|deque| deque.iter().copied().collect::<Vec<f64>>())
                 .unwrap_or_default();
             let median = self.median(dtype).unwrap_or(0.0);
+            let seq_samples_list = self
+                .seq_throughput
+                .get(dtype)
+                .map(|deque| deque.iter().copied().collect::<Vec<f64>>())
+                .unwrap_or_default();
+            let seq_median = self.median_seq(dtype).unwrap_or(0.0);
             let recommended = self.recommend_cutover(dtype);
             thresholds.push(ThresholdEntry {
                 dtype,
                 median_elements_per_ms: median,
+                seq_median_elements_per_ms: seq_median,
                 sample_count: samples_list.len(),
+                seq_sample_count: seq_samples_list.len(),
                 recommended_cutover: recommended,
                 samples: samples_list,
+                seq_samples: seq_samples_list,
             });
         }
         ThreadingSnapshot {
@@ -288,6 +336,52 @@ fn record_axis_event(
         &outcome,
         operation,
     );
+}
+
+fn record_scale_event(
+    dtype: &'static str,
+    rows: usize,
+    cols: usize,
+    elapsed: Duration,
+    parallel: bool,
+) {
+    if rows == 0 || cols == 0 {
+        return;
+    }
+    let elements = rows.saturating_mul(cols);
+    let duration_ms = elapsed.as_secs_f64() * 1_000.0;
+    if duration_ms <= 0.0 {
+        return;
+    }
+    let event = ThreadingEvent {
+        dtype,
+        elements,
+        duration_ms,
+        tiles: rows,
+        partial_buffer: cols,
+        parallel,
+        operation: "scale",
+    };
+    if let Ok(mut guard) = adaptive_state().lock() {
+        guard.record(event);
+    }
+}
+
+fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
+    let mut cutover = SCALE_PAR_MIN_ELEMS;
+    let mut prefer_parallel = true;
+    if let Ok(guard) = adaptive_state().lock() {
+        if let Some(recommended) = guard.recommend_cutover(dtype) {
+            cutover = cutover.max(recommended);
+        }
+        if let (Some(par_median), Some(seq_median)) = (guard.median(dtype), guard.median_seq(dtype))
+        {
+            if par_median <= seq_median * 1.05 {
+                prefer_parallel = false;
+            }
+        }
+    }
+    (cutover, prefer_parallel)
 }
 fn threading_snapshot() -> ThreadingSnapshot {
     adaptive_state()
@@ -389,12 +483,15 @@ fn parallel_scale_f64(
         return false;
     }
     if let Some(pool) = thread_pool() {
+        let threads = pool.current_num_threads().max(1);
+        let min_rows = ((rows + threads - 1) / threads).max(SCALE_PAR_MIN_ROWS);
+        let start = Instant::now();
         pool.install(|| {
             use rayon::prelude::*;
             input
                 .par_chunks(cols)
-                .with_min_len(cols * 8)
-                .zip(out.par_chunks_mut(cols).with_min_len(cols * 8))
+                .with_min_len(min_rows)
+                .zip(out.par_chunks_mut(cols).with_min_len(min_rows))
                 .for_each(|(src_row, dst_row)| {
                     if !simd::scale_same_shape_f64(src_row, factor, dst_row) {
                         for (dst, &value) in dst_row.iter_mut().zip(src_row.iter()) {
@@ -403,6 +500,7 @@ fn parallel_scale_f64(
                     }
                 });
         });
+        record_scale_event("float64", rows, cols, start.elapsed(), true);
         true
     } else {
         false
@@ -421,12 +519,15 @@ fn parallel_scale_f32(
     }
     let factor_f32 = factor as f32;
     if let Some(pool) = thread_pool() {
+        let threads = pool.current_num_threads().max(1);
+        let min_rows = ((rows + threads - 1) / threads).max(SCALE_PAR_MIN_ROWS);
+        let start = Instant::now();
         pool.install(|| {
             use rayon::prelude::*;
             input
                 .par_chunks(cols)
-                .with_min_len(cols * 8)
-                .zip(out.par_chunks_mut(cols).with_min_len(cols * 8))
+                .with_min_len(min_rows)
+                .zip(out.par_chunks_mut(cols).with_min_len(min_rows))
                 .for_each(|(src_row, dst_row)| {
                     if !simd::scale_same_shape_f32(src_row, factor_f32, dst_row) {
                         for (dst, &value) in dst_row.iter_mut().zip(src_row.iter()) {
@@ -435,29 +536,28 @@ fn parallel_scale_f32(
                     }
                 });
         });
+        record_scale_event("float32", rows, cols, start.elapsed(), true);
         true
     } else {
         false
     }
 }
 
+#[allow(dead_code)]
 #[inline]
 fn add_assign_f64(acc: &mut [f64], row: &[f64]) {
-    if simd::add_assign_inplace_f64(acc, row) {
-        return;
-    }
-    for (dst, &value) in acc.iter_mut().zip(row.iter()) {
-        *dst += value;
+    if !simd::add_assign_inplace_f64(acc, row) {
+        for (dst, &value) in acc.iter_mut().zip(row.iter()) {
+            *dst += value;
+        }
     }
 }
 
+#[allow(dead_code)]
 #[inline]
-fn accumulate_row_f32(acc: &mut [f32], row: &[f32]) {
-    if simd::add_assign_inplace_f32(acc, row) {
-        return;
-    }
+fn accumulate_row_f32(acc: &mut [f64], row: &[f32]) {
     for (dst, &value) in acc.iter_mut().zip(row.iter()) {
-        *dst += value;
+        *dst += value as f64;
     }
 }
 
@@ -838,7 +938,11 @@ where
             [len] if *len == cols => {
                 let lhs_slice = self.data_slice();
                 let rhs_slice = other.data_slice();
-                let mut data = vec![T::zero(); lhs_slice.len()];
+                let total_len = lhs_slice.len();
+                let mut data = Vec::with_capacity(total_len);
+                unsafe {
+                    data.set_len(total_len);
+                }
                 if T::DTYPE_NAME == "float64" {
                     let lhs = unsafe {
                         std::slice::from_raw_parts(
@@ -961,45 +1065,112 @@ where
         if rhs_slice.len() != rows {
             return None;
         }
-        let mut data = vec![T::zero(); lhs_slice.len()];
-        if cols == 0 {
-            return Some(NumericArray::new_owned(data, self.shape.clone()));
+        let total_len = lhs_slice.len();
+        if total_len == 0 {
+            return Some(NumericArray::new_owned(Vec::new(), self.shape.clone()));
         }
-        let spec = tiling::TileSpec::for_shape(rows, cols);
         if T::DTYPE_NAME == "float64" {
-            let lhs = unsafe {
-                std::slice::from_raw_parts(lhs_slice.as_ptr() as *const f64, lhs_slice.len())
-            };
-            let rhs = unsafe {
-                std::slice::from_raw_parts(rhs_slice.as_ptr() as *const f64, rhs_slice.len())
-            };
-            let out = unsafe {
-                std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f64, data.len())
-            };
-            if simd::add_column_broadcast_f64(lhs, rhs, rows, cols, out) {
-                return Some(NumericArray::new_owned(data, self.shape.clone()));
+            let lhs = unsafe { slice::from_raw_parts(lhs_slice.as_ptr() as *const f64, total_len) };
+            let rhs = unsafe { slice::from_raw_parts(rhs_slice.as_ptr() as *const f64, rows) };
+            let mut data = Vec::<f64>::with_capacity(total_len);
+            unsafe {
+                data.set_len(total_len);
             }
-        } else if T::DTYPE_NAME == "float32" {
-            let lhs = unsafe {
-                std::slice::from_raw_parts(lhs_slice.as_ptr() as *const f32, lhs_slice.len())
-            };
-            let rhs = unsafe {
-                std::slice::from_raw_parts(rhs_slice.as_ptr() as *const f32, rhs_slice.len())
-            };
-            let out = unsafe {
-                std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f32, data.len())
-            };
-            if simd::add_column_broadcast_f32(lhs, rhs, rows, cols, out) {
-                return Some(NumericArray::new_owned(data, self.shape.clone()));
+            let total_elems = rows.saturating_mul(cols);
+            if total_elems <= COLUMN_BROADCAST_DIRECT_MAX_ELEMS
+                && simd::add_column_broadcast_f64(lhs, rhs, rows, cols, data.as_mut_slice())
+            {
+                let out_vec = unsafe {
+                    let ptr = data.as_mut_ptr() as *mut T;
+                    let len = data.len();
+                    let cap = data.capacity();
+                    std::mem::forget(data);
+                    Vec::from_raw_parts(ptr, len, cap)
+                };
+                return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
             }
-            if should_parallelize(rows, cols, T::DTYPE_NAME) {
+            let allow_parallel =
+                should_parallelize(rows, cols, T::DTYPE_NAME) || rows >= BROADCAST_PAR_MIN_ROWS;
+            if allow_parallel {
                 if let Some(pool) = thread_pool() {
+                    let threads = pool.current_num_threads().max(1);
+                    let min_rows = ((rows + threads - 1) / threads).max(BROADCAST_PAR_MIN_ROWS);
                     pool.install(|| {
                         use rayon::prelude::*;
-                        lhs.par_chunks(cols)
-                            .zip(out.par_chunks_mut(cols))
-                            .zip(rhs.par_iter().copied())
-                            .for_each(|((lhs_row, out_row), scalar)| {
+                        data.par_chunks_mut(cols)
+                            .with_min_len(min_rows)
+                            .zip(lhs.par_chunks(cols).with_min_len(min_rows))
+                            .zip(rhs.par_iter().with_min_len(min_rows).copied())
+                            .for_each(|((out_row, lhs_row), scalar)| {
+                                if !simd::add_row_scalar_f64(lhs_row, scalar, out_row) {
+                                    for (dst, &value) in out_row.iter_mut().zip(lhs_row.iter()) {
+                                        *dst = value + scalar;
+                                    }
+                                }
+                            });
+                    });
+                    let out_vec = unsafe {
+                        let ptr = data.as_mut_ptr() as *mut T;
+                        let len = data.len();
+                        let cap = data.capacity();
+                        std::mem::forget(data);
+                        Vec::from_raw_parts(ptr, len, cap)
+                    };
+                    return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+                }
+            }
+            for (row_idx, chunk) in lhs.chunks(cols).enumerate() {
+                let scalar = rhs[row_idx];
+                let out_row = &mut data[row_idx * cols..(row_idx + 1) * cols];
+                if !simd::add_row_scalar_f64(chunk, scalar, out_row) {
+                    out_row.copy_from_slice(chunk);
+                    for value in out_row.iter_mut() {
+                        *value += scalar;
+                    }
+                }
+            }
+            let out_vec = unsafe {
+                let ptr = data.as_mut_ptr() as *mut T;
+                let len = data.len();
+                let cap = data.capacity();
+                std::mem::forget(data);
+                Vec::from_raw_parts(ptr, len, cap)
+            };
+            return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+        }
+        if T::DTYPE_NAME == "float32" {
+            let lhs = unsafe { slice::from_raw_parts(lhs_slice.as_ptr() as *const f32, total_len) };
+            let rhs = unsafe { slice::from_raw_parts(rhs_slice.as_ptr() as *const f32, rows) };
+            let mut data = Vec::<f32>::with_capacity(total_len);
+            unsafe {
+                data.set_len(total_len);
+            }
+            let total_elems = rows.saturating_mul(cols);
+            if total_elems <= COLUMN_BROADCAST_DIRECT_MAX_ELEMS
+                && simd::add_column_broadcast_f32(lhs, rhs, rows, cols, data.as_mut_slice())
+            {
+                let out_vec = unsafe {
+                    let ptr = data.as_mut_ptr() as *mut T;
+                    let len = data.len();
+                    let cap = data.capacity();
+                    std::mem::forget(data);
+                    Vec::from_raw_parts(ptr, len, cap)
+                };
+                return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+            }
+            let allow_parallel =
+                should_parallelize(rows, cols, T::DTYPE_NAME) || rows >= BROADCAST_PAR_MIN_ROWS;
+            if allow_parallel {
+                if let Some(pool) = thread_pool() {
+                    let threads = pool.current_num_threads().max(1);
+                    let min_rows = ((rows + threads - 1) / threads).max(BROADCAST_PAR_MIN_ROWS);
+                    pool.install(|| {
+                        use rayon::prelude::*;
+                        data.par_chunks_mut(cols)
+                            .with_min_len(min_rows)
+                            .zip(lhs.par_chunks(cols).with_min_len(min_rows))
+                            .zip(rhs.par_iter().with_min_len(min_rows).copied())
+                            .for_each(|((out_row, lhs_row), scalar)| {
                                 if !simd::add_row_scalar_f32(lhs_row, scalar, out_row) {
                                     for (dst, &value) in out_row.iter_mut().zip(lhs_row.iter()) {
                                         *dst = value + scalar;
@@ -1007,124 +1178,42 @@ where
                                 }
                             });
                     });
-                    return Some(NumericArray::new_owned(data, self.shape.clone()));
+                    let out_vec = unsafe {
+                        let ptr = data.as_mut_ptr() as *mut T;
+                        let len = data.len();
+                        let cap = data.capacity();
+                        std::mem::forget(data);
+                        Vec::from_raw_parts(ptr, len, cap)
+                    };
+                    return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
                 }
             }
-        }
-        if try_parallel(lhs_slice.len(), || {
-            use rayon::prelude::*;
-            match T::DTYPE_NAME {
-                "float64" => {
-                    let lhs_rows = unsafe {
-                        std::slice::from_raw_parts(
-                            lhs_slice.as_ptr() as *const f64,
-                            lhs_slice.len(),
-                        )
-                    };
-                    let rhs_vals = unsafe {
-                        std::slice::from_raw_parts(
-                            rhs_slice.as_ptr() as *const f64,
-                            rhs_slice.len(),
-                        )
-                    };
-                    data.par_chunks_mut(cols)
-                        .zip(lhs_rows.par_chunks(cols))
-                        .zip(rhs_vals.par_iter().copied())
-                        .for_each(|((out_row, lhs_row), scalar)| {
-                            let out = unsafe {
-                                std::slice::from_raw_parts_mut(
-                                    out_row.as_mut_ptr() as *mut f64,
-                                    out_row.len(),
-                                )
-                            };
-                            if !simd::add_row_scalar_f64(lhs_row, scalar, out) {
-                                for (dst, &src) in out.iter_mut().zip(lhs_row.iter()) {
-                                    *dst = src + scalar;
-                                }
-                            }
-                        });
-                }
-                "float32" => {
-                    let lhs_rows = unsafe {
-                        std::slice::from_raw_parts(
-                            lhs_slice.as_ptr() as *const f32,
-                            lhs_slice.len(),
-                        )
-                    };
-                    let rhs_vals = unsafe {
-                        std::slice::from_raw_parts(
-                            rhs_slice.as_ptr() as *const f32,
-                            rhs_slice.len(),
-                        )
-                    };
-                    data.par_chunks_mut(cols)
-                        .zip(lhs_rows.par_chunks(cols))
-                        .zip(rhs_vals.par_iter().copied())
-                        .for_each(|((out_row, lhs_row), scalar)| {
-                            let out = unsafe {
-                                std::slice::from_raw_parts_mut(
-                                    out_row.as_mut_ptr() as *mut f32,
-                                    out_row.len(),
-                                )
-                            };
-                            if !simd::add_row_scalar_f32(lhs_row, scalar, out) {
-                                for (dst, &src) in out.iter_mut().zip(lhs_row.iter()) {
-                                    *dst = src + scalar;
-                                }
-                            }
-                        });
-                }
-                _ => {
-                    let batch_rows = spec.row_block.max(1);
-                    let chunk_len = cols * batch_rows;
-                    data.par_chunks_mut(chunk_len.max(cols))
-                        .zip(lhs_slice.par_chunks(chunk_len.max(cols)))
-                        .enumerate()
-                        .for_each(|(chunk_index, (out_chunk, lhs_chunk))| {
-                            let row_start = chunk_index * batch_rows;
-                            let rows_in_chunk = rows.saturating_sub(row_start).min(batch_rows);
-                            for row_offset in 0..rows_in_chunk {
-                                let rhs_value = rhs_slice[row_start + row_offset];
-                                let start = row_offset * cols;
-                                let end = start + cols;
-                                let src_row = &lhs_chunk[start..end];
-                                let dst_row = &mut out_chunk[start..end];
-                                for (dst, &src) in dst_row.iter_mut().zip(src_row.iter()) {
-                                    *dst = src + rhs_value;
-                                }
-                            }
-                        });
+            for (row_idx, chunk) in lhs.chunks(cols).enumerate() {
+                let scalar = rhs[row_idx];
+                let out_row = &mut data[row_idx * cols..(row_idx + 1) * cols];
+                if !simd::add_row_scalar_f32(chunk, scalar, out_row) {
+                    out_row.copy_from_slice(chunk);
+                    for value in out_row.iter_mut() {
+                        *value += scalar;
+                    }
                 }
             }
-        }) {
-            return Some(NumericArray::new_owned(data, self.shape.clone()));
+            let out_vec = unsafe {
+                let ptr = data.as_mut_ptr() as *mut T;
+                let len = data.len();
+                let cap = data.capacity();
+                std::mem::forget(data);
+                Vec::from_raw_parts(ptr, len, cap)
+            };
+            return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
         }
+        let mut data = vec![T::zero(); total_len];
         for row in 0..rows {
             let start = row * cols;
-            let end = start + cols;
-            if T::DTYPE_NAME == "float64" {
-                let lhs = unsafe {
-                    std::slice::from_raw_parts(lhs_slice[start..end].as_ptr() as *const f64, cols)
-                };
-                let out = unsafe {
-                    std::slice::from_raw_parts_mut(data[start..end].as_mut_ptr() as *mut f64, cols)
-                };
-                if simd::add_row_scalar_f64(lhs, rhs_slice[row].try_to_f64().unwrap(), out) {
-                    continue;
-                }
-            } else if T::DTYPE_NAME == "float32" {
-                let lhs = unsafe {
-                    std::slice::from_raw_parts(lhs_slice[start..end].as_ptr() as *const f32, cols)
-                };
-                let out = unsafe {
-                    std::slice::from_raw_parts_mut(data[start..end].as_mut_ptr() as *mut f32, cols)
-                };
-                if simd::add_row_scalar_f32(lhs, rhs_slice[row].try_to_f64().unwrap() as f32, out) {
-                    continue;
-                }
-            }
+            let scalar = rhs_slice[row];
             for col in 0..cols {
-                data[start + col] = lhs_slice[start + col] + rhs_slice[row];
+                let idx = start + col;
+                data[idx] = lhs_slice[idx] + scalar;
             }
         }
         Some(NumericArray::new_owned(data, self.shape.clone()))
@@ -1345,6 +1434,7 @@ where
             data.set_len(len);
         }
         let (rows, cols) = self.matrix_dims();
+        let start = Instant::now();
         if T::DTYPE_NAME == "float64" {
             let input = self.data_slice();
             let input = unsafe { std::slice::from_raw_parts(input.as_ptr() as *const f64, len) };
@@ -1353,13 +1443,21 @@ where
                 for (dst, &value) in out.iter_mut().zip(input.iter()) {
                     *dst = value * factor;
                 }
+                record_scale_event("float64", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
-            let allow_parallel = should_parallelize(rows, cols, T::DTYPE_NAME);
+            let (parallel_cutover, prefer_parallel) = scale_parallel_policy("float64");
+            let base_parallel = should_parallelize(rows, cols, T::DTYPE_NAME);
+            let elements = rows.saturating_mul(cols);
+            let allow_parallel = prefer_parallel
+                && base_parallel
+                && elements >= parallel_cutover
+                && parallel_scale_f64(input, factor, out, rows, cols);
+            if allow_parallel {
+                return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
             if simd::scale_same_shape_f64(input, factor, out) {
-                return Ok(NumericArray::new_owned(data, self.shape.clone()));
-            }
-            if allow_parallel && parallel_scale_f64(input, factor, out, rows, cols) {
+                record_scale_event("float64", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
         } else if T::DTYPE_NAME == "float32" {
@@ -1371,17 +1469,23 @@ where
                 for (dst, &value) in out.iter_mut().zip(input.iter()) {
                     *dst = value * factor_f32;
                 }
+                record_scale_event("float32", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
-            let allow_parallel = should_parallelize(rows, cols, T::DTYPE_NAME);
-            if allow_parallel && rows >= 1024 && parallel_scale_f32(input, factor, out, rows, cols)
-            {
+            let (parallel_cutover, prefer_parallel) = scale_parallel_policy("float32");
+            let elements = rows.saturating_mul(cols);
+            let base_parallel = should_parallelize(rows, cols, T::DTYPE_NAME)
+                || (rows >= SCALE_PAR_MIN_ROWS * 4 && cols >= BROADCAST_PAR_MIN_COLS)
+                || (rows >= SCALE_PAR_MIN_ROWS * 2 && elements >= PARALLEL_MIN_ELEMENTS / 2);
+            let allow_parallel = prefer_parallel
+                && base_parallel
+                && elements >= parallel_cutover
+                && parallel_scale_f32(input, factor, out, rows, cols);
+            if allow_parallel {
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if simd::scale_same_shape_f32(input, factor as f32, out) {
-                return Ok(NumericArray::new_owned(data, self.shape.clone()));
-            }
-            if allow_parallel && parallel_scale_f32(input, factor, out, rows, cols) {
+                record_scale_event("float32", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
         }
@@ -1391,6 +1495,7 @@ where
                 T::DTYPE_NAME
             ))
         })?;
+        record_scale_event(T::DTYPE_NAME, rows, cols, start.elapsed(), false);
         Ok(NumericArray::new_owned(data, self.shape.clone()))
     }
 
@@ -1581,6 +1686,14 @@ where
     }
 }
 
+fn add_row_inplace_f64(dst: &mut [f64], src: &[f64]) {
+    if !simd::add_assign_inplace_f64(dst, src) {
+        for (d, &s) in dst.iter_mut().zip(src.iter()) {
+            *d += s;
+        }
+    }
+}
+
 fn reduce_axis0_f64(
     data: &[f64],
     rows: usize,
@@ -1594,48 +1707,126 @@ fn reduce_axis0_f64(
             parallel: false,
         };
     }
-    let total = rows * cols;
+
+    if cols <= AXIS0_SIMD_COL_LIMIT {
+        let mut parallel_used = false;
+        let mut sums = Vec::<f64>::new();
+        if allow_parallel && rows >= AXIS0_PAR_MIN_ROWS && rows * cols >= PARALLEL_MIN_ELEMENTS {
+            if let Some(pool) = thread_pool() {
+                parallel_used = true;
+                sums = pool.install(|| {
+                    use rayon::prelude::*;
+                    data.par_chunks(cols)
+                        .with_min_len(AXIS0_PAR_MIN_ROWS)
+                        .fold(
+                            || vec![0.0f64; cols],
+                            |mut acc, row| {
+                                add_row_inplace_f64(&mut acc, row);
+                                acc
+                            },
+                        )
+                        .reduce(
+                            || vec![0.0f64; cols],
+                            |mut acc, partial| {
+                                add_row_inplace_f64(&mut acc, partial.as_slice());
+                                acc
+                            },
+                        )
+                });
+            }
+        }
+        if sums.is_empty() {
+            let mut seq = vec![0.0f64; cols];
+            for row in data.chunks_exact(cols) {
+                add_row_inplace_f64(&mut seq, row);
+            }
+            sums = seq;
+            parallel_used = false;
+        }
+        if matches!(op, Reduction::Mean) {
+            let inv = 1.0 / rows as f64;
+            for value in &mut sums {
+                *value *= inv;
+            }
+        }
+        return AxisOutcome {
+            values: sums,
+            parallel: parallel_used,
+        };
+    }
+
+    if rows <= SMALL_AXIS_PARALLEL_ROWS {
+        let mut sums = vec![0.0f64; cols];
+        for row in data.chunks_exact(cols) {
+            add_row_inplace_f64(&mut sums, row);
+        }
+        if matches!(op, Reduction::Mean) {
+            let inv = 1.0 / rows as f64;
+            for value in &mut sums {
+                *value *= inv;
+            }
+        }
+        return AxisOutcome {
+            values: sums,
+            parallel: false,
+        };
+    }
+
     let mut parallel_used = false;
-    let mut sums = if allow_parallel && total >= PARALLEL_MIN_ELEMENTS {
+    let (mut sums, mut comps) = if allow_parallel && rows * cols >= PARALLEL_MIN_ELEMENTS {
         if let Some(pool) = thread_pool() {
             parallel_used = true;
             pool.install(|| {
                 use rayon::prelude::*;
                 data.par_chunks(cols)
+                    .with_min_len(AXIS0_PAR_MIN_ROWS)
                     .fold(
-                        || vec![0.0; cols],
+                        || (vec![0.0f64; cols], vec![0.0f64; cols]),
                         |mut acc, row| {
-                            add_assign_f64(&mut acc, row);
+                            kahan_accumulate_row_f64(&mut acc.0, &mut acc.1, row);
                             acc
                         },
                     )
                     .reduce(
-                        || vec![0.0; cols],
+                        || (vec![0.0f64; cols], vec![0.0f64; cols]),
                         |mut acc, partial| {
-                            add_assign_f64(&mut acc, &partial);
+                            for idx in 0..cols {
+                                kahan_step(&mut acc.0[idx], &mut acc.1[idx], partial.0[idx]);
+                                if partial.1[idx] != 0.0 {
+                                    kahan_step(&mut acc.0[idx], &mut acc.1[idx], partial.1[idx]);
+                                }
+                            }
                             acc
                         },
                     )
             })
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         }
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     };
+
     if sums.is_empty() {
         parallel_used = false;
-        sums = vec![0.0; cols];
-        for row in data.chunks(cols) {
-            add_assign_f64(&mut sums, row);
+        sums = vec![0.0f64; cols];
+        comps = vec![0.0f64; cols];
+        for row in data.chunks_exact(cols) {
+            kahan_accumulate_row_f64(&mut sums, &mut comps, row);
         }
     }
+
+    for idx in 0..cols {
+        sums[idx] += comps[idx];
+    }
+
     if matches!(op, Reduction::Mean) {
         let inv = 1.0 / rows as f64;
         for value in &mut sums {
             *value *= inv;
         }
     }
+
     AxisOutcome {
         values: sums,
         parallel: parallel_used,
@@ -1655,50 +1846,126 @@ fn reduce_axis0_f32(
             parallel: false,
         };
     }
-    let total = rows * cols;
+
+    if cols <= AXIS0_SIMD_COL_LIMIT {
+        let mut parallel_used = false;
+        let mut sums = Vec::<f64>::new();
+        if allow_parallel && rows >= AXIS0_PAR_MIN_ROWS && rows * cols >= PARALLEL_MIN_ELEMENTS {
+            if let Some(pool) = thread_pool() {
+                parallel_used = true;
+                sums = pool.install(|| {
+                    use rayon::prelude::*;
+                    data.par_chunks(cols)
+                        .with_min_len(AXIS0_PAR_MIN_ROWS)
+                        .fold(
+                            || vec![0.0f64; cols],
+                            |mut acc, row| {
+                                accumulate_row_simple_f32(&mut acc, row);
+                                acc
+                            },
+                        )
+                        .reduce(
+                            || vec![0.0f64; cols],
+                            |mut acc, partial| {
+                                add_row_inplace_f64(&mut acc, partial.as_slice());
+                                acc
+                            },
+                        )
+                });
+            }
+        }
+        if sums.is_empty() {
+            let mut seq = vec![0.0f64; cols];
+            for row in data.chunks_exact(cols) {
+                accumulate_row_simple_f32(&mut seq, row);
+            }
+            sums = seq;
+            parallel_used = false;
+        }
+        if matches!(op, Reduction::Mean) {
+            let inv = 1.0 / rows as f64;
+            for value in &mut sums {
+                *value *= inv;
+            }
+        }
+        return AxisOutcome {
+            values: sums,
+            parallel: parallel_used,
+        };
+    }
+
+    if rows <= SMALL_AXIS_PARALLEL_ROWS {
+        let mut sums = vec![0.0f64; cols];
+        for row in data.chunks_exact(cols) {
+            accumulate_row_simple_f32(&mut sums, row);
+        }
+        if matches!(op, Reduction::Mean) {
+            let inv = 1.0 / rows as f64;
+            for value in &mut sums {
+                *value *= inv;
+            }
+        }
+        return AxisOutcome {
+            values: sums,
+            parallel: false,
+        };
+    }
+
     let mut parallel_used = false;
-    let mut sums_f32 = if allow_parallel && total >= PARALLEL_MIN_ELEMENTS {
+    let (mut sums, mut comps) = if allow_parallel && rows * cols >= PARALLEL_MIN_ELEMENTS {
         if let Some(pool) = thread_pool() {
             parallel_used = true;
             pool.install(|| {
                 use rayon::prelude::*;
                 data.par_chunks(cols)
-                    .with_min_len(cols * 16)
+                    .with_min_len(AXIS0_PAR_MIN_ROWS)
                     .fold(
-                        || vec![0.0f32; cols],
+                        || (vec![0.0f64; cols], vec![0.0f64; cols]),
                         |mut acc, row| {
-                            accumulate_row_f32(&mut acc, row);
+                            kahan_accumulate_row_f32(&mut acc.0, &mut acc.1, row);
                             acc
                         },
                     )
                     .reduce(
-                        || vec![0.0f32; cols],
+                        || (vec![0.0f64; cols], vec![0.0f64; cols]),
                         |mut acc, partial| {
-                            accumulate_row_f32(&mut acc, &partial);
+                            for idx in 0..cols {
+                                kahan_step(&mut acc.0[idx], &mut acc.1[idx], partial.0[idx]);
+                                if partial.1[idx] != 0.0 {
+                                    kahan_step(&mut acc.0[idx], &mut acc.1[idx], partial.1[idx]);
+                                }
+                            }
                             acc
                         },
                     )
             })
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         }
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     };
-    if sums_f32.is_empty() {
+
+    if sums.is_empty() {
         parallel_used = false;
-        sums_f32 = vec![0.0f32; cols];
-        for row in data.chunks(cols) {
-            accumulate_row_f32(&mut sums_f32, row);
+        sums = vec![0.0f64; cols];
+        comps = vec![0.0f64; cols];
+        for row in data.chunks_exact(cols) {
+            kahan_accumulate_row_f32(&mut sums, &mut comps, row);
         }
     }
-    let mut sums: Vec<f64> = sums_f32.iter().map(|&value| value as f64).collect();
+
+    for idx in 0..cols {
+        sums[idx] += comps[idx];
+    }
+
     if matches!(op, Reduction::Mean) {
         let inv = 1.0 / rows as f64;
         for value in &mut sums {
             *value *= inv;
         }
     }
+
     AxisOutcome {
         values: sums,
         parallel: parallel_used,
@@ -1718,15 +1985,19 @@ fn reduce_axis1_f64(
             parallel: false,
         };
     }
-    let total = rows * cols;
+
     let mut parallel_used = false;
-    let mut sums = if allow_parallel && total >= PARALLEL_MIN_ELEMENTS {
+    let mut sums = if allow_parallel && rows * cols >= PARALLEL_MIN_ELEMENTS {
         if let Some(pool) = thread_pool() {
             parallel_used = true;
             pool.install(|| {
                 use rayon::prelude::*;
-                data.par_chunks(cols)
-                    .map(|row| row.iter().sum::<f64>())
+                (0..rows)
+                    .into_par_iter()
+                    .map(|row_idx| {
+                        let offset = row_idx * cols;
+                        reduce_row_simd_f64(&data[offset..offset + cols])
+                    })
                     .collect::<Vec<f64>>()
             })
         } else {
@@ -1738,9 +2009,8 @@ fn reduce_axis1_f64(
     if sums.is_empty() {
         parallel_used = false;
         let mut out = Vec::with_capacity(rows);
-        for row in data.chunks(cols) {
-            let sum = simd::reduce_sum_f64(row, 1).unwrap_or_else(|| row.iter().sum::<f64>());
-            out.push(sum);
+        for row in data.chunks_exact(cols) {
+            out.push(reduce_row_simd_f64(row));
         }
         sums = out;
     }
@@ -1769,17 +2039,18 @@ fn reduce_axis1_f32(
             parallel: false,
         };
     }
-    let total = rows * cols;
+
     let mut parallel_used = false;
-    let mut sums = if allow_parallel && total >= PARALLEL_MIN_ELEMENTS {
+    let mut sums = if allow_parallel && rows * cols >= PARALLEL_MIN_ELEMENTS {
         if let Some(pool) = thread_pool() {
             parallel_used = true;
             pool.install(|| {
                 use rayon::prelude::*;
-                data.par_chunks(cols)
-                    .map(|row| {
-                        simd::reduce_sum_f32(row, 1)
-                            .unwrap_or_else(|| row.iter().map(|&value| value as f64).sum::<f64>())
+                (0..rows)
+                    .into_par_iter()
+                    .map(|row_idx| {
+                        let offset = row_idx * cols;
+                        reduce_row_simd_f32(&data[offset..offset + cols])
                     })
                     .collect::<Vec<f64>>()
             })
@@ -1792,10 +2063,8 @@ fn reduce_axis1_f32(
     if sums.is_empty() {
         parallel_used = false;
         let mut out = Vec::with_capacity(rows);
-        for row in data.chunks(cols) {
-            let sum = simd::reduce_sum_f32(row, 1)
-                .unwrap_or_else(|| row.iter().map(|&value| value as f64).sum::<f64>());
-            out.push(sum);
+        for row in data.chunks_exact(cols) {
+            out.push(reduce_row_simd_f32(row));
         }
         sums = out;
     }
@@ -1810,6 +2079,7 @@ fn reduce_axis1_f32(
         parallel: parallel_used,
     }
 }
+
 #[derive(Clone, Copy)]
 enum Reduction {
     Sum,
@@ -2277,8 +2547,14 @@ fn threading_info_py(py: Python<'_>) -> PyResult<PyObject> {
     for entry in snapshot.thresholds {
         let entry_dict = PyDict::new_bound(py);
         entry_dict.set_item("median_elements_per_ms", entry.median_elements_per_ms)?;
+        entry_dict.set_item(
+            "seq_median_elements_per_ms",
+            entry.seq_median_elements_per_ms,
+        )?;
         entry_dict.set_item("sample_count", entry.sample_count)?;
+        entry_dict.set_item("seq_sample_count", entry.seq_sample_count)?;
         entry_dict.set_item("samples", PyList::new_bound(py, entry.samples))?;
+        entry_dict.set_item("seq_samples", PyList::new_bound(py, entry.seq_samples))?;
         match entry.recommended_cutover {
             Some(value) => entry_dict.set_item("recommended_cutover", value)?,
             None => entry_dict.set_item("recommended_cutover", py.None())?,
@@ -2337,4 +2613,158 @@ fn _raptors(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__doc__", "Rust-backed array core for the Raptors project.")?;
 
     Ok(())
+}
+
+#[inline]
+fn kahan_step(sum: &mut f64, comp: &mut f64, value: f64) {
+    let y = value - *comp;
+    let t = *sum + y;
+    *comp = (t - *sum) - y;
+    *sum = t;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn array_f64(data: Vec<f64>, shape: Vec<usize>) -> NumericArray<f64> {
+        NumericArray::new_owned(data, shape)
+    }
+
+    fn array_f32(data: Vec<f32>, shape: Vec<usize>) -> NumericArray<f32> {
+        NumericArray::new_owned(data, shape)
+    }
+
+    fn array_i32(data: Vec<i32>, shape: Vec<usize>) -> NumericArray<i32> {
+        NumericArray::new_owned(data, shape)
+    }
+
+    #[test]
+    fn sum_and_mean_handle_basic_matrix() {
+        let array = array_f64(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        assert_eq!(array.sum_f64().unwrap(), 10.0);
+        assert_eq!(array.mean_f64().unwrap(), 2.5);
+    }
+
+    #[test]
+    fn add_same_shape_produces_expected_values() {
+        let lhs = array_f64(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let rhs = array_f64(vec![4.0, 3.0, 2.0, 1.0], vec![2, 2]);
+        let result = lhs.add(&rhs).unwrap();
+        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.to_vec(), vec![5.0, 5.0, 5.0, 5.0]);
+    }
+
+    #[test]
+    fn add_supports_row_broadcasts() {
+        let lhs = array_f64(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
+        let rhs = array_f64(vec![10.0, 20.0, 30.0], vec![3]);
+        let result = lhs.add(&rhs).unwrap();
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(result.to_vec(), vec![11.0, 22.0, 33.0, 14.0, 25.0, 36.0]);
+    }
+
+    #[test]
+    fn add_supports_column_broadcasts() {
+        let lhs = array_f64(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let rhs = array_f64(vec![5.0, 6.0], vec![2, 1]);
+        let result = lhs.add(&rhs).unwrap();
+        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.to_vec(), vec![6.0, 7.0, 9.0, 10.0]);
+    }
+
+    #[test]
+    fn add_supports_scalar_broadcasts() {
+        let lhs = array_f32(vec![1.0, 2.0, 3.0, 4.0], vec![4]);
+        let rhs = array_f32(vec![2.5], vec![1]);
+        let result = lhs.add(&rhs).unwrap();
+        assert_eq!(result.shape, vec![4]);
+        assert_eq!(result.to_vec(), vec![3.5_f32, 4.5_f32, 5.5_f32, 6.5_f32]);
+    }
+
+    #[test]
+    fn scale_rejects_fractional_factors_for_i32() {
+        let array = array_i32(vec![1, 2, 3, 4], vec![4]);
+        assert!(array.scale(0.5).is_err());
+        let doubled = array.scale(2.0).unwrap();
+        assert_eq!(doubled.to_vec(), vec![2, 4, 6, 8]);
+    }
+
+    #[test]
+    fn reduce_axis_0_and_1_match_expected_results() {
+        let matrix = array_f64(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
+        let axis0 = matrix
+            .reduce_axis(0, Reduction::Sum)
+            .expect("axis-0 reduction succeeds");
+        assert_eq!(axis0.shape, vec![3]);
+        assert_eq!(axis0.to_vec(), vec![5.0, 7.0, 9.0]);
+
+        let axis1 = matrix
+            .reduce_axis(1, Reduction::Mean)
+            .expect("axis-1 reduction succeeds");
+        assert_eq!(axis1.shape, vec![2]);
+        assert_eq!(axis1.to_vec(), vec![2.0, 5.0]);
+    }
+
+    #[test]
+    fn broadcast_shapes_reports_incompatible_operands() {
+        let err = broadcast_shapes(&[2, 2], &[3, 2]).unwrap_err();
+        Python::with_gil(|py| {
+            assert!(err.is_instance_of::<PyValueError>(py));
+        });
+    }
+}
+
+pub fn init_test_module(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
+    _raptors(py, module)
+}
+
+fn kahan_accumulate_row_f64(sums: &mut [f64], comps: &mut [f64], row: &[f64]) {
+    for (idx, &value) in row.iter().enumerate() {
+        kahan_step(&mut sums[idx], &mut comps[idx], value);
+    }
+}
+
+fn kahan_accumulate_row_f32(sums: &mut [f64], comps: &mut [f64], row: &[f32]) {
+    for (idx, &value) in row.iter().enumerate() {
+        kahan_step(&mut sums[idx], &mut comps[idx], value as f64);
+    }
+}
+
+fn accumulate_row_simple_f32(sums: &mut [f64], row: &[f32]) {
+    for (dst, &value) in sums.iter_mut().zip(row.iter()) {
+        *dst += value as f64;
+    }
+}
+
+fn recommended_accumulators(len: usize) -> usize {
+    if len >= 4096 {
+        8
+    } else if len >= 2048 {
+        6
+    } else if len >= 1024 {
+        4
+    } else if len >= 512 {
+        2
+    } else {
+        1
+    }
+}
+
+fn reduce_row_simd_f64(row: &[f64]) -> f64 {
+    let accumulators = recommended_accumulators(row.len());
+    if let Some(sum) = simd::reduce_sum_f64(row, accumulators) {
+        sum
+    } else {
+        row.iter().sum()
+    }
+}
+
+fn reduce_row_simd_f32(row: &[f32]) -> f64 {
+    let accumulators = recommended_accumulators(row.len());
+    if let Some(sum) = simd::reduce_sum_f32(row, accumulators) {
+        sum
+    } else {
+        row.iter().map(|&value| value as f64).sum()
+    }
 }

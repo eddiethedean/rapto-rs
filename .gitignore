@@ -6,6 +6,7 @@ __pycache__/
 .ruff_cache/
 .tox/
 .venv/
+.raptors-test-venv/
 build/
 dist/
 target/
@@ -13,4 +14,5 @@ target/
 wheelhouse/
 .DS_Store
 benchmarks/results/
+/.python-version
 

@@ -20,6 +20,13 @@ fn recommended_accumulators(len: usize, max: usize) -> usize {
     }
 }
 
+fn kahan_add(sum: &mut f64, comp: &mut f64, value: f64) {
+    let y = value - *comp;
+    let t = *sum + y;
+    *comp = (t - *sum) - y;
+    *sum = t;
+}
+
 #[derive(Clone, Copy)]
 pub enum GlobalOp {
     Sum,
@@ -66,6 +73,8 @@ pub fn reduce_full_f64(
             partial_buffer: 1,
         };
     }
+
+    let allow_parallel = allow_parallel || elements >= DIRECT_PARALLEL_MIN_ELEMENTS;
 
     if elements <= DIRECT_REDUCTION_LIMIT {
         let direct_pool = if allow_parallel { pool } else { None };
@@ -123,6 +132,8 @@ pub fn reduce_full_f32(
             partial_buffer: 1,
         };
     }
+
+    let allow_parallel = allow_parallel || elements >= DIRECT_PARALLEL_MIN_ELEMENTS;
 
     if elements <= DIRECT_REDUCTION_LIMIT {
         let direct_pool = if allow_parallel { pool } else { None };
@@ -229,6 +240,7 @@ fn sequential_sum_f64(
     let tile_cols = aligned_tile_cols(spec, cols);
     let slots = buffer.max(1).min(rows.max(1));
     let mut partials = vec![0.0f64; slots];
+    let mut comps = vec![0.0f64; slots];
     let mut cursor = 0usize;
 
     for row in data.chunks(cols) {
@@ -238,13 +250,18 @@ fn sequential_sum_f64(
             let slice = &row[col..end];
             let sum = simd::reduce_sum_f64(slice, spec.accumulators)
                 .unwrap_or_else(|| slice.iter().sum::<f64>());
-            partials[cursor] += sum;
+            kahan_add(&mut partials[cursor], &mut comps[cursor], sum);
             cursor = (cursor + 1) % partials.len();
             col = end;
         }
     }
 
-    partials.into_iter().sum()
+    let mut total = 0.0f64;
+    let mut comp = 0.0f64;
+    for (value, c) in partials.into_iter().zip(comps.into_iter()) {
+        kahan_add(&mut total, &mut comp, value + c);
+    }
+    total
 }
 
 fn sequential_sum_f32(
@@ -257,6 +274,7 @@ fn sequential_sum_f32(
     let tile_cols = aligned_tile_cols(spec, cols);
     let slots = buffer.max(1).min(rows.max(1));
     let mut partials = vec![0.0f64; slots];
+    let mut comps = vec![0.0f64; slots];
     let mut cursor = 0usize;
 
     for row in data.chunks(cols) {
@@ -266,13 +284,18 @@ fn sequential_sum_f32(
             let slice = &row[col..end];
             let sum = simd::reduce_sum_f32(slice, spec.accumulators)
                 .unwrap_or_else(|| slice.iter().map(|&v| v as f64).sum::<f64>());
-            partials[cursor] += sum;
+            kahan_add(&mut partials[cursor], &mut comps[cursor], sum);
             cursor = (cursor + 1) % partials.len();
             col = end;
         }
     }
 
-    partials.into_iter().sum()
+    let mut total = 0.0f64;
+    let mut comp = 0.0f64;
+    for (value, c) in partials.into_iter().zip(comps.into_iter()) {
+        kahan_add(&mut total, &mut comp, value + c);
+    }
+    total
 }
 
 fn parallel_sum_f64(
@@ -285,14 +308,29 @@ fn parallel_sum_f64(
     use rayon::prelude::*;
 
     let chunk_elems = cols.saturating_mul(spec.row_block.max(1));
-    pool.install(|| {
+    let (sum, comp) = pool.install(|| {
         data.par_chunks(chunk_elems.max(1))
-            .map(|chunk| {
-                let rows = chunk.len() / cols;
-                sequential_sum_f64(chunk, cols, spec, buffer, rows)
-            })
-            .sum()
-    })
+            .fold(
+                || (0.0f64, 0.0f64),
+                |mut acc, chunk| {
+                    let rows = chunk.len() / cols;
+                    let value = sequential_sum_f64(chunk, cols, spec, buffer, rows);
+                    kahan_add(&mut acc.0, &mut acc.1, value);
+                    acc
+                },
+            )
+            .reduce(
+                || (0.0f64, 0.0f64),
+                |mut acc, value| {
+                    kahan_add(&mut acc.0, &mut acc.1, value.0);
+                    if value.1 != 0.0 {
+                        kahan_add(&mut acc.0, &mut acc.1, value.1);
+                    }
+                    acc
+                },
+            )
+    });
+    sum + comp
 }
 
 fn parallel_sum_f32(
@@ -305,14 +343,29 @@ fn parallel_sum_f32(
     use rayon::prelude::*;
 
     let chunk_elems = cols.saturating_mul(spec.row_block.max(1));
-    pool.install(|| {
+    let (sum, comp) = pool.install(|| {
         data.par_chunks(chunk_elems.max(1))
-            .map(|chunk| {
-                let rows = chunk.len() / cols;
-                sequential_sum_f32(chunk, cols, spec, buffer, rows)
-            })
-            .sum()
-    })
+            .fold(
+                || (0.0f64, 0.0f64),
+                |mut acc, chunk| {
+                    let rows = chunk.len() / cols;
+                    let value = sequential_sum_f32(chunk, cols, spec, buffer, rows);
+                    kahan_add(&mut acc.0, &mut acc.1, value);
+                    acc
+                },
+            )
+            .reduce(
+                || (0.0f64, 0.0f64),
+                |mut acc, value| {
+                    kahan_add(&mut acc.0, &mut acc.1, value.0);
+                    if value.1 != 0.0 {
+                        kahan_add(&mut acc.0, &mut acc.1, value.1);
+                    }
+                    acc
+                },
+            )
+    });
+    sum + comp
 }
 
 fn aligned_tile_cols(spec: &TileSpec, cols: usize) -> usize {
@@ -336,4 +389,56 @@ fn estimate_tiles(rows: usize, cols: usize, spec: &TileSpec) -> usize {
     let row_tiles = (rows + spec.row_block - 1) / spec.row_block;
     let col_tiles = (cols + spec.col_block - 1) / spec.col_block;
     row_tiles * col_tiles
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recommended_accumulators_increase_with_input_size() {
+        assert_eq!(recommended_accumulators(1 << 10, 8), 1);
+        assert_eq!(recommended_accumulators(1 << 18, 8), 4);
+        assert_eq!(recommended_accumulators(1 << 20, 8), 7);
+        assert_eq!(recommended_accumulators(1 << 22, 8), 8);
+    }
+
+    #[test]
+    fn direct_sum_matches_scalar_sum_for_small_inputs() {
+        let data: Vec<f64> = (0..16).map(|value| value as f64).collect();
+        let expected: f64 = data.iter().copied().sum();
+        let total = direct_sum_f64(&data, 4, 4, None);
+        assert_eq!(total, expected);
+    }
+
+    #[test]
+    fn reduce_full_handles_mean_operation() {
+        let data = vec![1.0, 2.0, 3.0, 4.0];
+        let outcome = reduce_full_f64(&data, 2, 2, GlobalOp::Mean, None, false);
+        assert_eq!(outcome.value, 2.5);
+        assert_eq!(outcome.tiles_processed, 1);
+        assert!(!outcome.parallel);
+    }
+
+    #[test]
+    fn partial_buffer_len_respects_bounds() {
+        let spec = TileSpec::for_shape(512, 256);
+        assert_eq!(partial_buffer_len(&spec, 1), 1);
+        let expected = spec.accumulators.clamp(2, 32);
+        assert_eq!(partial_buffer_len(&spec, 1024), expected);
+    }
+
+    #[test]
+    fn estimate_tiles_returns_zero_when_empty() {
+        let spec = TileSpec::for_shape(0, 0);
+        assert_eq!(estimate_tiles(0, 10, &spec), 0);
+        assert_eq!(estimate_tiles(10, 0, &spec), 0);
+    }
+
+    #[test]
+    fn estimate_tiles_counts_row_and_column_blocks() {
+        let spec = TileSpec::for_shape(64, 64);
+        let tiles = estimate_tiles(128, 128, &spec);
+        assert!(tiles >= 4);
+    }
 }

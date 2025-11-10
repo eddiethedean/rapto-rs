@@ -72,3 +72,30 @@ impl TileSpec {
         self.row_block * self.col_block
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tile_spec_tile_elems_matches_product() {
+        let spec = TileSpec::for_shape(128, 256);
+        assert_eq!(spec.tile_elems(), spec.row_block * spec.col_block);
+    }
+
+    #[test]
+    fn tile_spec_for_len_produces_non_zero_blocks() {
+        let spec = TileSpec::for_len(10_000);
+        assert!(spec.row_block >= 1);
+        assert!(spec.col_block >= 1);
+        assert!(spec.lane_width >= 1);
+        assert!(spec.accumulators >= 1);
+    }
+
+    #[test]
+    fn tile_spec_for_shape_never_exceeds_dimensions() {
+        let spec = TileSpec::for_shape(32, 48);
+        assert!(spec.row_block <= 32);
+        assert!(spec.col_block <= 48);
+    }
+}

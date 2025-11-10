@@ -12,8 +12,11 @@ class AdaptiveThreshold:
     baseline_cutover: int
     recommended_cutover: Optional[int]
     median_elements_per_ms: float
+    seq_median_elements_per_ms: float
     sample_count: int
+    seq_sample_count: int
     samples: List[float]
+    seq_samples: List[float]
     target_latency_ms: float
 
 
@@ -60,14 +63,20 @@ def _build_adaptive_thresholds(payload) -> Dict[str, AdaptiveThreshold]:
     result: Dict[str, AdaptiveThreshold] = {}
     for dtype, details in (payload or {}).items():
         samples = [float(value) for value in details.get("samples", [])]
+        seq_samples = [float(value) for value in details.get("seq_samples", [])]
         recommended = details.get("recommended_cutover")
         result[str(dtype)] = AdaptiveThreshold(
             dtype=str(dtype),
             baseline_cutover=int(details.get("baseline_cutover", 0)),
             recommended_cutover=int(recommended) if recommended is not None else None,
             median_elements_per_ms=float(details.get("median_elements_per_ms", 0.0)),
+            seq_median_elements_per_ms=float(
+                details.get("seq_median_elements_per_ms", 0.0)
+            ),
             sample_count=int(details.get("sample_count", 0)),
+            seq_sample_count=int(details.get("seq_sample_count", 0)),
             samples=samples,
+            seq_samples=seq_samples,
             target_latency_ms=float(details.get("target_latency_ms", 0.0)),
         )
     return result

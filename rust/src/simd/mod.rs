@@ -49,14 +49,11 @@ pub fn add_column_broadcast_f64(
     cols: usize,
     out: &mut [f64],
 ) -> bool {
-    if input.len() != rows * cols || input.len() != out.len() || col_values.len() != rows {
+    if input.len() != out.len()
+        || input.len() != rows.saturating_mul(cols)
+        || col_values.len() != rows
+    {
         return false;
-    }
-    if std::arch::is_x86_feature_detected!("avx512f") {
-        unsafe {
-            x86::avx512::add_columnar_f64(input, col_values, rows, cols, out);
-        }
-        return true;
     }
     if std::arch::is_x86_feature_detected!("avx2") {
         unsafe {
@@ -75,7 +72,10 @@ pub fn add_column_broadcast_f64(
     cols: usize,
     out: &mut [f64],
 ) -> bool {
-    if input.len() != rows * cols || input.len() != out.len() || col_values.len() != rows {
+    if input.len() != out.len()
+        || input.len() != rows.saturating_mul(cols)
+        || col_values.len() != rows
+    {
         return false;
     }
     unsafe {
@@ -104,7 +104,10 @@ pub fn add_column_broadcast_f32(
     cols: usize,
     out: &mut [f32],
 ) -> bool {
-    if input.len() != rows * cols || input.len() != out.len() || col_values.len() != rows {
+    if input.len() != out.len()
+        || input.len() != rows.saturating_mul(cols)
+        || col_values.len() != rows
+    {
         return false;
     }
     if std::arch::is_x86_feature_detected!("avx2") {
@@ -124,7 +127,10 @@ pub fn add_column_broadcast_f32(
     cols: usize,
     out: &mut [f32],
 ) -> bool {
-    if input.len() != rows * cols || input.len() != out.len() || col_values.len() != rows {
+    if input.len() != out.len()
+        || input.len() != rows.saturating_mul(cols)
+        || col_values.len() != rows
+    {
         return false;
     }
     unsafe {
@@ -423,6 +429,7 @@ mod x86 {
 
     const LANES_F64: usize = 4;
     const LANES_F32: usize = 8;
+    const PREFETCH_DISTANCE_F32: usize = LANES_F32 * 8;
     const MAX_ACCUMULATORS_F64: usize = 6;
     const MAX_ACCUMULATORS_F32: usize = 8;
 
@@ -773,6 +780,30 @@ mod x86 {
         let factor_v = _mm256_set1_ps(factor);
 
         let mut i = 0usize;
+        while i + LANES_F32 * 4 <= len {
+            let base = ptr_in.add(i);
+            if i + PREFETCH_DISTANCE_F32 < len {
+                _mm_prefetch(
+                    ptr_in.add(i + PREFETCH_DISTANCE_F32) as *const i8,
+                    _MM_HINT_T0,
+                );
+            }
+            let a0 = _mm256_loadu_ps(base);
+            let a1 = _mm256_loadu_ps(base.add(LANES_F32));
+            let a2 = _mm256_loadu_ps(base.add(LANES_F32 * 2));
+            let a3 = _mm256_loadu_ps(base.add(LANES_F32 * 3));
+            let c0 = _mm256_mul_ps(a0, factor_v);
+            let c1 = _mm256_mul_ps(a1, factor_v);
+            let c2 = _mm256_mul_ps(a2, factor_v);
+            let c3 = _mm256_mul_ps(a3, factor_v);
+            let out_base = ptr_out.add(i);
+            _mm256_storeu_ps(out_base, c0);
+            _mm256_storeu_ps(out_base.add(LANES_F32), c1);
+            _mm256_storeu_ps(out_base.add(LANES_F32 * 2), c2);
+            _mm256_storeu_ps(out_base.add(LANES_F32 * 3), c3);
+            i += LANES_F32 * 4;
+        }
+
         while i + LANES_F32 <= len {
             let a = _mm256_loadu_ps(ptr_in.add(i));
             let c = _mm256_mul_ps(a, factor_v);

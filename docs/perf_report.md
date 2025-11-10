@@ -1,5 +1,15 @@
 # Performance & Benchmarking Report
 
+## Latest Measurements (RAPTORS_THREADS=8, warmup 1, repeats 7)
+
+- `float64` @ `2048²` `sum`: **0.42 ms** (NumPy 0.59 ms, 1.40× faster)
+- `float64` @ `2048²` `mean`: **0.30 ms** (NumPy 0.51 ms, 1.67×); axis0/1 still trail slightly (`mean_axis0` ≈ 0.46 ms, `mean_axis1` ≈ 0.47 ms)
+- `float32` @ `2048²` column `broadcast_add`: **0.44 ms** (NumPy 0.68 ms, 1.54× faster)
+- `float32` @ `2048²` `scale`: **0.33 ms** (NumPy 1.07 ms, 3.21× faster)
+- Gaps remain for mid-size axes and broadcast at 512²–1024² (see benchmark JSON for full breakdown).
+
+The SIMD suite continues to use `--simd-mode force`; pinning threads via `RAPTORS_THREADS=8` is now recommended to limit scheduling variance during regression checks.
+
 ## Overview
 
 This document tracks the current baseline goals for Raptors' dense 2‑D kernels.  The targets mirror the JSON baselines consumed by CI and reflect the maximum wall-clock time (in milliseconds) allowed on release builds using Python 3.12 (`--warmup 1 --repeats 7`).
