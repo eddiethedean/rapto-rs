@@ -99,6 +99,12 @@ assert alias.to_list()[4] == 99.0
       --validate-json benchmarks/baselines/2d_float64.json --validate-slack 0.05
   ```
 
+### Running Tests
+
+- `./run_all_tests.sh` — provisions a local virtualenv, builds the extension with maturin, runs the Rust suite, and executes pytest.
+- `cargo xtest` — runs the Rust unit and integration tests (`cargo test --no-default-features --features test-suite`).  
+  Set `RAPTORS_TEST_PYTHON` if the project-local `.venv/bin/python` is unavailable; the harness auto-loads the matching `libpython`.
+
 ## Continuous Integration
 
 CI currently consists of two entry points:

@@ -1,0 +1,76 @@
+{
+  "parallel_min_elements": 32768,
+  "baseline_cutovers": {
+    "float64": 32768,
+    "float32": 49152,
+    "int32": 65536
+  },
+  "dimension_thresholds": {
+    "float64": [
+      64,
+      64
+    ],
+    "float32": [
+      128,
+      64
+    ],
+    "int32": [
+      128,
+      128
+    ]
+  },
+  "thread_pool": {
+    "active_threads": 10
+  },
+  "adaptive_thresholds": {
+    "float64": {
+      "dtype": "float64",
+      "baseline_cutover": 32768,
+      "recommended_cutover": null,
+      "median_elements_per_ms": 0.0,
+      "seq_median_elements_per_ms": 0.0,
+      "p95_elements_per_ms": null,
+      "seq_p95_elements_per_ms": null,
+      "variance_ratio": null,
+      "seq_variance_ratio": null,
+      "sample_count": 0,
+      "seq_sample_count": 0,
+      "samples": [],
+      "seq_samples": [],
+      "target_latency_ms": 0.28
+    },
+    "float32": {
+      "dtype": "float32",
+      "baseline_cutover": 49152,
+      "recommended_cutover": null,
+      "median_elements_per_ms": 0.0,
+      "seq_median_elements_per_ms": 0.0,
+      "p95_elements_per_ms": null,
+      "seq_p95_elements_per_ms": null,
+      "variance_ratio": null,
+      "seq_variance_ratio": null,
+      "sample_count": 0,
+      "seq_sample_count": 0,
+      "samples": [],
+      "seq_samples": [],
+      "target_latency_ms": 0.32
+    },
+    "int32": {
+      "dtype": "int32",
+      "baseline_cutover": 65536,
+      "recommended_cutover": null,
+      "median_elements_per_ms": 0.0,
+      "seq_median_elements_per_ms": 0.0,
+      "p95_elements_per_ms": null,
+      "seq_p95_elements_per_ms": null,
+      "variance_ratio": null,
+      "seq_variance_ratio": null,
+      "sample_count": 0,
+      "seq_sample_count": 0,
+      "samples": [],
+      "seq_samples": [],
+      "target_latency_ms": 0.4
+    }
+  },
+  "last_event": null
+}

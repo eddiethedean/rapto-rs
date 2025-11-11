@@ -14,6 +14,9 @@ mod reduce;
 mod simd;
 mod tiling;
 
+#[cfg(test)]
+mod test_support;
+
 use crate::reduce::tiled::SMALL_DIRECT_THRESHOLD;
 
 use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
@@ -105,18 +108,21 @@ const ADAPTIVE_SAMPLE_WINDOW: usize = 9;
 const TRACKED_DTYPES: &[&str] = &["float64", "float32", "int32"];
 
 const SMALL_AXIS_PARALLEL_ROWS: usize = 512;
-const AXIS0_SIMD_COL_LIMIT: usize = 1024;
+const AXIS0_SIMD_COL_LIMIT: usize = 2048;
 const AXIS0_PAR_MIN_ROWS: usize = 64;
 const SCALE_PAR_MIN_ROWS: usize = 32;
 const BROADCAST_PAR_MIN_ROWS: usize = 48;
 const BROADCAST_PAR_MIN_COLS: usize = 64;
-const COLUMN_BROADCAST_DIRECT_MAX_ELEMS: usize = 1 << 19;
+const AXIS0_COLUMN_SIMD_MIN_ROWS: usize = 64;
+const AXIS0_COLUMN_SIMD_MIN_COLS: usize = 32;
+const COLUMN_BROADCAST_DIRECT_MIN_ELEMS: usize = 1 << 20;
+const SMALL_MATRIX_FAST_DIM: usize = 256;
+const SCALE_TINY_DIM: usize = 512;
 const SCALE_PAR_MIN_ELEMS: usize = 1 << 21;
+const SCALE_PAR_MIN_ELEMS_F64: usize = 1 << 19;
 const OPERATION_SCALE: &str = "scale";
 const OPERATION_BROADCAST_ROW: &str = "broadcast_row";
 const OPERATION_BROADCAST_COL: &str = "broadcast_col";
-const SMALL_AXIS_FAST_COLS: usize = 64;
-const SMALL_AXIS_FAST_ROWS: usize = 128;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 enum AxisKind {
@@ -152,6 +158,10 @@ struct ThresholdEntry {
     dtype: &'static str,
     median_elements_per_ms: f64,
     seq_median_elements_per_ms: f64,
+    p95_elements_per_ms: Option<f64>,
+    seq_p95_elements_per_ms: Option<f64>,
+    variance_ratio: Option<f64>,
+    seq_variance_ratio: Option<f64>,
     sample_count: usize,
     seq_sample_count: usize,
     recommended_cutover: Option<usize>,
@@ -261,12 +271,52 @@ impl AdaptiveThreadingState {
         }
     }
 
+    fn percentile_from_deque(values: &VecDeque<f64>, percentile: f64) -> Option<f64> {
+        if values.is_empty() {
+            return None;
+        }
+        let mut sorted = values.iter().copied().collect::<Vec<_>>();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+        let pct = percentile.clamp(0.0, 1.0);
+        let max_index = sorted.len().saturating_sub(1);
+        let position = pct * max_index as f64;
+        let lower = position.floor() as usize;
+        let upper = position.ceil() as usize;
+        if lower == upper {
+            Some(sorted[lower])
+        } else {
+            let weight = position - lower as f64;
+            Some(sorted[lower] * (1.0 - weight) + sorted[upper] * weight)
+        }
+    }
+
     fn median(&self, dtype: &'static str) -> Option<f64> {
         self.median_from_map(&self.throughput, dtype)
     }
 
     fn median_seq(&self, dtype: &'static str) -> Option<f64> {
         self.median_from_map(&self.seq_throughput, dtype)
+    }
+
+    fn percentile_from_map<K>(
+        &self,
+        map: &HashMap<K, VecDeque<f64>>,
+        key: K,
+        percentile: f64,
+    ) -> Option<f64>
+    where
+        K: Eq + Hash + Copy,
+    {
+        let values = map.get(&key)?;
+        Self::percentile_from_deque(values, percentile)
+    }
+
+    fn percentile(&self, dtype: &'static str, percentile: f64, parallel: bool) -> Option<f64> {
+        if parallel {
+            self.percentile_from_map(&self.throughput, dtype, percentile)
+        } else {
+            self.percentile_from_map(&self.seq_throughput, dtype, percentile)
+        }
     }
 
     fn axis_median(&self, axis: AxisKind, dtype: &'static str, parallel: bool) -> Option<f64> {
@@ -315,6 +365,21 @@ impl AdaptiveThreadingState {
             &self.op_sequential
         };
         map.get(&key).map(VecDeque::len).unwrap_or(0)
+    }
+
+    fn operation_percentile(
+        &self,
+        operation: &'static str,
+        dtype: &'static str,
+        parallel: bool,
+        percentile: f64,
+    ) -> Option<f64> {
+        let key = (operation, dtype);
+        if parallel {
+            self.percentile_from_map(&self.op_parallel, key, percentile)
+        } else {
+            self.percentile_from_map(&self.op_sequential, key, percentile)
+        }
     }
 
     fn recommend_cutover(&self, dtype: &'static str) -> Option<usize> {
@@ -366,17 +431,35 @@ impl AdaptiveThreadingState {
                 .map(|deque| deque.iter().copied().collect::<Vec<f64>>())
                 .unwrap_or_default();
             let median = self.median(dtype).unwrap_or(0.0);
+            let p95 = self.percentile(dtype, 0.95, true);
             let seq_samples_list = self
                 .seq_throughput
                 .get(dtype)
                 .map(|deque| deque.iter().copied().collect::<Vec<f64>>())
                 .unwrap_or_default();
             let seq_median = self.median_seq(dtype).unwrap_or(0.0);
+            let seq_p95 = self.percentile(dtype, 0.95, false);
             let recommended = self.recommend_cutover(dtype);
             thresholds.push(ThresholdEntry {
                 dtype,
                 median_elements_per_ms: median,
                 seq_median_elements_per_ms: seq_median,
+                p95_elements_per_ms: p95,
+                seq_p95_elements_per_ms: seq_p95,
+                variance_ratio: p95.and_then(|value| {
+                    if median > 0.0 {
+                        Some(value / median)
+                    } else {
+                        None
+                    }
+                }),
+                seq_variance_ratio: seq_p95.and_then(|value| {
+                    if seq_median > 0.0 {
+                        Some(value / seq_median)
+                    } else {
+                        None
+                    }
+                }),
                 sample_count: samples_list.len(),
                 seq_sample_count: seq_samples_list.len(),
                 recommended_cutover: recommended,
@@ -551,7 +634,10 @@ fn record_broadcast_event(
 }
 
 fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
-    let mut cutover = SCALE_PAR_MIN_ELEMS;
+    let mut cutover = match dtype {
+        "float64" => SCALE_PAR_MIN_ELEMS_F64,
+        _ => SCALE_PAR_MIN_ELEMS,
+    };
     let mut prefer_parallel = true;
     if let Ok(guard) = adaptive_state().lock() {
         if let Some(recommended) = guard.recommend_cutover_op(OPERATION_SCALE, dtype) {
@@ -561,7 +647,7 @@ fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
         }
         let par_samples = guard.operation_sample_count(OPERATION_SCALE, dtype, true);
         let seq_samples = guard.operation_sample_count(OPERATION_SCALE, dtype, false);
-        if seq_samples > 0 && par_samples == 0 {
+        if seq_samples >= 6 && par_samples == 0 {
             prefer_parallel = false;
         }
         if par_samples >= 2 && seq_samples >= 1 {
@@ -572,11 +658,56 @@ fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
                 if par_median <= seq_median * 1.05 {
                     prefer_parallel = false;
                 }
+                if let Some(par_p95) =
+                    guard.operation_percentile(OPERATION_SCALE, dtype, true, 0.95)
+                {
+                    if par_median > 0.0 && par_p95 >= par_median * 1.35 {
+                        prefer_parallel = false;
+                    }
+                }
+                if let Some(seq_p95) =
+                    guard.operation_percentile(OPERATION_SCALE, dtype, false, 0.95)
+                {
+                    if seq_median > 0.0 && seq_p95 <= seq_median * 1.05 {
+                        prefer_parallel = false;
+                    }
+                }
                 let target = target_latency_ms(dtype);
                 if target > 0.0 {
                     let effective = par_median.max(seq_median);
                     let op_cutover = (effective * target).ceil() as usize;
                     cutover = cutover.max(op_cutover.max(1));
+                }
+                if let (Some(par_p95), Some(seq_p95)) = (
+                    guard.operation_percentile(OPERATION_SCALE, dtype, true, 0.95),
+                    guard.operation_percentile(OPERATION_SCALE, dtype, false, 0.95),
+                ) {
+                    if par_p95 <= seq_p95 * 1.08 {
+                        prefer_parallel = false;
+                    }
+                    let target = target_latency_ms(dtype);
+                    if target > 0.0 {
+                        let worst = par_p95.max(seq_p95);
+                        let op_cutover = (worst * target).ceil() as usize;
+                        cutover = cutover.max(op_cutover.max(1));
+                    }
+                } else if let Some(par_p95) =
+                    guard.operation_percentile(OPERATION_SCALE, dtype, true, 0.95)
+                {
+                    let target = target_latency_ms(dtype);
+                    if target > 0.0 {
+                        let op_cutover = (par_p95 * target).ceil() as usize;
+                        cutover = cutover.max(op_cutover.max(1));
+                    }
+                } else if let Some(seq_p95) =
+                    guard.operation_percentile(OPERATION_SCALE, dtype, false, 0.95)
+                {
+                    let target = target_latency_ms(dtype);
+                    if target > 0.0 {
+                        let op_cutover = (seq_p95 * target).ceil() as usize;
+                        cutover = cutover.max(op_cutover.max(1));
+                    }
+                    prefer_parallel = false;
                 }
             }
         } else if let (Some(par_median), Some(seq_median)) =
@@ -584,6 +715,16 @@ fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
         {
             if par_median <= seq_median * 1.05 {
                 prefer_parallel = false;
+            }
+            if let Some(par_p95) = guard.percentile(dtype, 0.95, true) {
+                if par_median > 0.0 && par_p95 >= par_median * 1.35 {
+                    prefer_parallel = false;
+                }
+            }
+            if let Some(seq_p95) = guard.percentile(dtype, 0.95, false) {
+                if seq_median > 0.0 && seq_p95 <= seq_median * 1.05 {
+                    prefer_parallel = false;
+                }
             }
         }
     }
@@ -737,7 +878,7 @@ fn broadcast_parallel_policy(
         let seq_samples = guard.operation_sample_count(operation, dtype, false);
         let par_samples = guard.operation_sample_count(operation, dtype, true);
 
-        if seq_samples > 0 && par_samples == 0 {
+        if par_samples == 0 && seq_samples >= 6 && rows <= 768 && cols <= 768 {
             return false;
         }
 
@@ -780,15 +921,15 @@ fn parallel_scale_f64(
         let threads = pool.current_num_threads().max(1);
         let min_rows = ((rows + threads - 1) / threads).max(SCALE_PAR_MIN_ROWS);
         let start = Instant::now();
+        let chunk_elems = cols.saturating_mul(min_rows.max(1));
         pool.install(|| {
             use rayon::prelude::*;
             input
-                .par_chunks(cols)
-                .with_min_len(min_rows)
-                .zip(out.par_chunks_mut(cols).with_min_len(min_rows))
-                .for_each(|(src_row, dst_row)| {
-                    if !simd::scale_same_shape_f64(src_row, factor, dst_row) {
-                        for (dst, &value) in dst_row.iter_mut().zip(src_row.iter()) {
+                .par_chunks(chunk_elems)
+                .zip(out.par_chunks_mut(chunk_elems))
+                .for_each(|(src_block, dst_block)| {
+                    if !simd::scale_same_shape_f64(src_block, factor, dst_block) {
+                        for (dst, &value) in dst_block.iter_mut().zip(src_block.iter()) {
                             *dst = value * factor;
                         }
                     }
@@ -816,15 +957,15 @@ fn parallel_scale_f32(
         let threads = pool.current_num_threads().max(1);
         let min_rows = ((rows + threads - 1) / threads).max(SCALE_PAR_MIN_ROWS);
         let start = Instant::now();
+        let chunk_elems = cols.saturating_mul(min_rows.max(1));
         pool.install(|| {
             use rayon::prelude::*;
             input
-                .par_chunks(cols)
-                .with_min_len(min_rows)
-                .zip(out.par_chunks_mut(cols).with_min_len(min_rows))
-                .for_each(|(src_row, dst_row)| {
-                    if !simd::scale_same_shape_f32(src_row, factor_f32, dst_row) {
-                        for (dst, &value) in dst_row.iter_mut().zip(src_row.iter()) {
+                .par_chunks(chunk_elems)
+                .zip(out.par_chunks_mut(chunk_elems))
+                .for_each(|(src_block, dst_block)| {
+                    if !simd::scale_same_shape_f32(src_block, factor_f32, dst_block) {
+                        for (dst, &value) in dst_block.iter_mut().zip(src_block.iter()) {
                             *dst = value * factor_f32;
                         }
                     }
@@ -1422,31 +1563,32 @@ where
         if T::DTYPE_NAME == "float64" {
             let lhs = unsafe { slice::from_raw_parts(lhs_slice.as_ptr() as *const f64, total_len) };
             let rhs = unsafe { slice::from_raw_parts(rhs_slice.as_ptr() as *const f64, rows) };
+            let total_elems = rows.saturating_mul(cols);
+            if total_elems < COLUMN_BROADCAST_DIRECT_MIN_ELEMS {
+                let mut data = Vec::<f64>::with_capacity(total_len);
+                unsafe {
+                    data.set_len(total_len);
+                    std::ptr::copy_nonoverlapping(lhs.as_ptr(), data.as_mut_ptr(), total_len);
+                }
+                for (row_idx, scalar) in rhs.iter().enumerate() {
+                    let start = row_idx * cols;
+                    let row_slice = &mut data[start..start + cols];
+                    for value in row_slice.iter_mut() {
+                        *value += *scalar;
+                    }
+                }
+                let out_vec = unsafe {
+                    let ptr = data.as_mut_ptr() as *mut T;
+                    let len = data.len();
+                    let cap = data.capacity();
+                    std::mem::forget(data);
+                    Vec::from_raw_parts(ptr, len, cap)
+                };
+                return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+            }
             let mut data = Vec::<f64>::with_capacity(total_len);
             unsafe {
                 data.set_len(total_len);
-            }
-            let total_elems = rows.saturating_mul(cols);
-            if total_elems <= COLUMN_BROADCAST_DIRECT_MAX_ELEMS {
-                let start = Instant::now();
-                if simd::add_column_broadcast_f64(lhs, rhs, rows, cols, data.as_mut_slice()) {
-                    record_broadcast_event(
-                        T::DTYPE_NAME,
-                        rows,
-                        cols,
-                        start.elapsed(),
-                        false,
-                        BroadcastKind::Column,
-                    );
-                    let out_vec = unsafe {
-                        let ptr = data.as_mut_ptr() as *mut T;
-                        let len = data.len();
-                        let cap = data.capacity();
-                        std::mem::forget(data);
-                        Vec::from_raw_parts(ptr, len, cap)
-                    };
-                    return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
-                }
             }
             let base_parallel =
                 should_parallelize(rows, cols, T::DTYPE_NAME) || rows >= BROADCAST_PAR_MIN_ROWS;
@@ -1494,6 +1636,27 @@ where
                     return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
                 }
             }
+            if total_elems >= COLUMN_BROADCAST_DIRECT_MIN_ELEMS {
+                let start = Instant::now();
+                if simd::add_column_broadcast_f64(lhs, rhs, rows, cols, data.as_mut_slice()) {
+                    record_broadcast_event(
+                        T::DTYPE_NAME,
+                        rows,
+                        cols,
+                        start.elapsed(),
+                        false,
+                        BroadcastKind::Column,
+                    );
+                    let out_vec = unsafe {
+                        let ptr = data.as_mut_ptr() as *mut T;
+                        let len = data.len();
+                        let cap = data.capacity();
+                        std::mem::forget(data);
+                        Vec::from_raw_parts(ptr, len, cap)
+                    };
+                    return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+                }
+            }
             let start = Instant::now();
             for (row_idx, chunk) in lhs.chunks(cols).enumerate() {
                 let scalar = rhs[row_idx];
@@ -1525,31 +1688,32 @@ where
         if T::DTYPE_NAME == "float32" {
             let lhs = unsafe { slice::from_raw_parts(lhs_slice.as_ptr() as *const f32, total_len) };
             let rhs = unsafe { slice::from_raw_parts(rhs_slice.as_ptr() as *const f32, rows) };
+            let total_elems = rows.saturating_mul(cols);
+            if total_elems < COLUMN_BROADCAST_DIRECT_MIN_ELEMS {
+                let mut data = Vec::<f32>::with_capacity(total_len);
+                unsafe {
+                    data.set_len(total_len);
+                    std::ptr::copy_nonoverlapping(lhs.as_ptr(), data.as_mut_ptr(), total_len);
+                }
+                for (row_idx, scalar) in rhs.iter().enumerate() {
+                    let start = row_idx * cols;
+                    let row_slice = &mut data[start..start + cols];
+                    for value in row_slice.iter_mut() {
+                        *value += *scalar;
+                    }
+                }
+                let out_vec = unsafe {
+                    let ptr = data.as_mut_ptr() as *mut T;
+                    let len = data.len();
+                    let cap = data.capacity();
+                    std::mem::forget(data);
+                    Vec::from_raw_parts(ptr, len, cap)
+                };
+                return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+            }
             let mut data = Vec::<f32>::with_capacity(total_len);
             unsafe {
                 data.set_len(total_len);
-            }
-            let total_elems = rows.saturating_mul(cols);
-            if total_elems <= COLUMN_BROADCAST_DIRECT_MAX_ELEMS {
-                let start = Instant::now();
-                if simd::add_column_broadcast_f32(lhs, rhs, rows, cols, data.as_mut_slice()) {
-                    record_broadcast_event(
-                        T::DTYPE_NAME,
-                        rows,
-                        cols,
-                        start.elapsed(),
-                        false,
-                        BroadcastKind::Column,
-                    );
-                    let out_vec = unsafe {
-                        let ptr = data.as_mut_ptr() as *mut T;
-                        let len = data.len();
-                        let cap = data.capacity();
-                        std::mem::forget(data);
-                        Vec::from_raw_parts(ptr, len, cap)
-                    };
-                    return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
-                }
             }
             let base_parallel =
                 should_parallelize(rows, cols, T::DTYPE_NAME) || rows >= BROADCAST_PAR_MIN_ROWS;
@@ -1585,6 +1749,27 @@ where
                         cols,
                         start.elapsed(),
                         true,
+                        BroadcastKind::Column,
+                    );
+                    let out_vec = unsafe {
+                        let ptr = data.as_mut_ptr() as *mut T;
+                        let len = data.len();
+                        let cap = data.capacity();
+                        std::mem::forget(data);
+                        Vec::from_raw_parts(ptr, len, cap)
+                    };
+                    return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+                }
+            }
+            if total_elems >= COLUMN_BROADCAST_DIRECT_MIN_ELEMS {
+                let start = Instant::now();
+                if simd::add_column_broadcast_f32(lhs, rhs, rows, cols, data.as_mut_slice()) {
+                    record_broadcast_event(
+                        T::DTYPE_NAME,
+                        rows,
+                        cols,
+                        start.elapsed(),
+                        false,
                         BroadcastKind::Column,
                     );
                     let out_vec = unsafe {
@@ -1864,6 +2049,28 @@ where
                 record_scale_event("float64", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
+            if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
+                for (dst, &value) in out.iter_mut().zip(input.iter()) {
+                    *dst = value * factor;
+                }
+                record_scale_event("float64", rows, cols, start.elapsed(), false);
+                return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            if rows <= SCALE_TINY_DIM && cols <= SCALE_TINY_DIM {
+                let mut tmp = input.to_vec();
+                for value in &mut tmp {
+                    *value *= factor;
+                }
+                record_scale_event("float64", rows, cols, start.elapsed(), false);
+                let out_vec = unsafe {
+                    let ptr = tmp.as_mut_ptr() as *mut T;
+                    let len = tmp.len();
+                    let cap = tmp.capacity();
+                    std::mem::forget(tmp);
+                    Vec::from_raw_parts(ptr, len, cap)
+                };
+                return Ok(NumericArray::new_owned(out_vec, self.shape.clone()));
+            }
             let (parallel_cutover, prefer_parallel) = scale_parallel_policy("float64");
             let base_parallel = should_parallelize(rows, cols, T::DTYPE_NAME);
             let elements = rows.saturating_mul(cols);
@@ -1889,6 +2096,30 @@ where
                 }
                 record_scale_event("float32", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
+                let factor_f32 = factor as f32;
+                for (dst, &value) in out.iter_mut().zip(input.iter()) {
+                    *dst = value * factor_f32;
+                }
+                record_scale_event("float32", rows, cols, start.elapsed(), false);
+                return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            if rows <= SCALE_TINY_DIM && cols <= SCALE_TINY_DIM {
+                let mut tmp = input.to_vec();
+                let factor_f32 = factor as f32;
+                for value in &mut tmp {
+                    *value *= factor_f32;
+                }
+                record_scale_event("float32", rows, cols, start.elapsed(), false);
+                let out_vec = unsafe {
+                    let ptr = tmp.as_mut_ptr() as *mut T;
+                    let len = tmp.len();
+                    let cap = tmp.capacity();
+                    std::mem::forget(tmp);
+                    Vec::from_raw_parts(ptr, len, cap)
+                };
+                return Ok(NumericArray::new_owned(out_vec, self.shape.clone()));
             }
             let (parallel_cutover, prefer_parallel) = scale_parallel_policy("float32");
             let elements = rows.saturating_mul(cols);
@@ -2140,14 +2371,20 @@ fn reduce_axis0_f64(
         };
     }
 
-    if cols <= SMALL_AXIS_FAST_COLS && rows <= SMALL_AXIS_FAST_ROWS {
-        let mut stack = [0.0f64; SMALL_AXIS_FAST_COLS];
-        for row in data.chunks_exact(cols) {
-            for (idx, &value) in row.iter().enumerate() {
-                stack[idx] += value;
+    if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
+        let mut sums_stack = [0.0f64; SMALL_MATRIX_FAST_DIM];
+        let mut comps_stack = [0.0f64; SMALL_MATRIX_FAST_DIM];
+        {
+            let sums_slice = &mut sums_stack[..cols];
+            let comps_slice = &mut comps_stack[..cols];
+            for row in data.chunks_exact(cols) {
+                kahan_accumulate_row_f64(sums_slice, comps_slice, row);
             }
         }
-        let mut sums = stack[..cols].to_vec();
+        let mut sums = sums_stack[..cols].to_vec();
+        for (idx, value) in comps_stack[..cols].iter().enumerate() {
+            sums[idx] += *value;
+        }
         if matches!(op, Reduction::Mean) {
             let inv = 1.0 / rows as f64;
             for value in &mut sums {
@@ -2293,84 +2530,88 @@ fn reduce_axis0_f32(
     allow_parallel: bool,
 ) -> AxisOutcome {
     if cols == 0 || rows == 0 {
-        return AxisOutcome {
-            values: vec![0.0; cols],
-            parallel: false,
-        };
+        return finalize_axis0_f32(vec![0.0; cols], None, rows, cols, op, false);
+    }
+
+    if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
+        let mut sums = vec![0.0f32; cols];
+        let mut comps = vec![0.0f32; cols];
+        for row in data.chunks_exact(cols) {
+            kahan_accumulate_row_f32_native(&mut sums, &mut comps, row);
+        }
+        return finalize_axis0_f32(sums, Some(comps), rows, cols, op, false);
     }
 
     if cols <= AXIS0_SIMD_COL_LIMIT {
+        if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
+            return finalize_axis0_f32(simd_totals, None, rows, cols, op, false);
+        }
+
         let mut parallel_used = false;
-        let mut sums = Vec::<f64>::new();
+        let mut sums: Vec<f32> = Vec::new();
+        let mut comps: Option<Vec<f32>> = None;
         if allow_parallel && rows >= AXIS0_PAR_MIN_ROWS && rows * cols >= PARALLEL_MIN_ELEMENTS {
             if let Some(pool) = thread_pool() {
                 parallel_used = true;
-                sums = pool.install(|| {
+                let (sum_vec, comp_vec) = pool.install(|| {
                     use rayon::prelude::*;
                     data.par_chunks(cols)
                         .with_min_len(AXIS0_PAR_MIN_ROWS)
                         .fold(
-                            || vec![0.0f64; cols],
+                            || (vec![0.0f32; cols], vec![0.0f32; cols]),
                             |mut acc, row| {
-                                accumulate_row_simple_f32(&mut acc, row);
+                                kahan_accumulate_row_f32_native(&mut acc.0, &mut acc.1, row);
                                 acc
                             },
                         )
                         .reduce(
-                            || vec![0.0f64; cols],
+                            || (vec![0.0f32; cols], vec![0.0f32; cols]),
                             |mut acc, partial| {
-                                add_row_inplace_f64(&mut acc, partial.as_slice());
+                                for idx in 0..cols {
+                                    kahan_step_f32(
+                                        &mut acc.0[idx],
+                                        &mut acc.1[idx],
+                                        partial.0[idx],
+                                    );
+                                    if partial.1[idx] != 0.0 {
+                                        kahan_step_f32(
+                                            &mut acc.0[idx],
+                                            &mut acc.1[idx],
+                                            partial.1[idx],
+                                        );
+                                    }
+                                }
                                 acc
                             },
                         )
                 });
+                sums = sum_vec;
+                comps = Some(comp_vec);
             }
         }
         if sums.is_empty() {
-            if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
-                sums = simd_totals;
-                parallel_used = false;
-            } else {
-                let mut seq = vec![0.0f64; cols];
-                for row in data.chunks_exact(cols) {
-                    accumulate_row_simple_f32(&mut seq, row);
-                }
-                sums = seq;
-                parallel_used = false;
+            sums = vec![0.0f32; cols];
+            let mut corrections = vec![0.0f32; cols];
+            for row in data.chunks_exact(cols) {
+                kahan_accumulate_row_f32_native(&mut sums, &mut corrections, row);
             }
+            comps = Some(corrections);
+            parallel_used = false;
         }
-        if matches!(op, Reduction::Mean) {
-            let inv = 1.0 / rows as f64;
-            for value in &mut sums {
-                *value *= inv;
-            }
-        }
-        return AxisOutcome {
-            values: sums,
-            parallel: parallel_used,
-        };
+        return finalize_axis0_f32(sums, comps, rows, cols, op, parallel_used);
     }
 
     if rows <= SMALL_AXIS_PARALLEL_ROWS {
-        let mut sums = if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
+        let sums = if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
             simd_totals
         } else {
-            let mut seq = vec![0.0f64; cols];
+            let mut seq = vec![0.0f32; cols];
             for row in data.chunks_exact(cols) {
-                accumulate_row_simple_f32(&mut seq, row);
+                add_row_inplace_f32(&mut seq, row);
             }
             seq
         };
-        if matches!(op, Reduction::Mean) {
-            let inv = 1.0 / rows as f64;
-            for value in &mut sums {
-                *value *= inv;
-            }
-        }
-        return AxisOutcome {
-            values: sums,
-            parallel: false,
-        };
+        return finalize_axis0_f32(sums, None, rows, cols, op, false);
     }
 
     let mut parallel_used = false;
@@ -2382,19 +2623,23 @@ fn reduce_axis0_f32(
                 data.par_chunks(cols)
                     .with_min_len(AXIS0_PAR_MIN_ROWS)
                     .fold(
-                        || (vec![0.0f64; cols], vec![0.0f64; cols]),
+                        || (vec![0.0f32; cols], vec![0.0f32; cols]),
                         |mut acc, row| {
-                            kahan_accumulate_row_f32(&mut acc.0, &mut acc.1, row);
+                            kahan_accumulate_row_f32_native(&mut acc.0, &mut acc.1, row);
                             acc
                         },
                     )
                     .reduce(
-                        || (vec![0.0f64; cols], vec![0.0f64; cols]),
+                        || (vec![0.0f32; cols], vec![0.0f32; cols]),
                         |mut acc, partial| {
                             for idx in 0..cols {
-                                kahan_step(&mut acc.0[idx], &mut acc.1[idx], partial.0[idx]);
+                                kahan_step_f32(&mut acc.0[idx], &mut acc.1[idx], partial.0[idx]);
                                 if partial.1[idx] != 0.0 {
-                                    kahan_step(&mut acc.0[idx], &mut acc.1[idx], partial.1[idx]);
+                                    kahan_step_f32(
+                                        &mut acc.0[idx],
+                                        &mut acc.1[idx],
+                                        partial.1[idx],
+                                    );
                                 }
                             }
                             acc
@@ -2412,31 +2657,17 @@ fn reduce_axis0_f32(
         parallel_used = false;
         if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
             sums = simd_totals;
-            comps = vec![0.0f64; cols];
+            comps = vec![0.0f32; cols];
         } else {
-            sums = vec![0.0f64; cols];
-            comps = vec![0.0f64; cols];
+            sums = vec![0.0f32; cols];
+            comps = vec![0.0f32; cols];
             for row in data.chunks_exact(cols) {
-                kahan_accumulate_row_f32(&mut sums, &mut comps, row);
+                kahan_accumulate_row_f32_native(&mut sums, &mut comps, row);
             }
         }
     }
 
-    for idx in 0..cols {
-        sums[idx] += comps[idx];
-    }
-
-    if matches!(op, Reduction::Mean) {
-        let inv = 1.0 / rows as f64;
-        for value in &mut sums {
-            *value *= inv;
-        }
-    }
-
-    AxisOutcome {
-        values: sums,
-        parallel: parallel_used,
-    }
+    finalize_axis0_f32(sums, Some(comps), rows, cols, op, parallel_used)
 }
 
 fn reduce_axis1_f64(
@@ -3018,6 +3249,22 @@ fn threading_info_py(py: Python<'_>) -> PyResult<PyObject> {
             "seq_median_elements_per_ms",
             entry.seq_median_elements_per_ms,
         )?;
+        match entry.p95_elements_per_ms {
+            Some(value) => entry_dict.set_item("p95_elements_per_ms", value)?,
+            None => entry_dict.set_item("p95_elements_per_ms", py.None())?,
+        }
+        match entry.seq_p95_elements_per_ms {
+            Some(value) => entry_dict.set_item("seq_p95_elements_per_ms", value)?,
+            None => entry_dict.set_item("seq_p95_elements_per_ms", py.None())?,
+        }
+        match entry.variance_ratio {
+            Some(value) => entry_dict.set_item("variance_ratio", value)?,
+            None => entry_dict.set_item("variance_ratio", py.None())?,
+        }
+        match entry.seq_variance_ratio {
+            Some(value) => entry_dict.set_item("seq_variance_ratio", value)?,
+            None => entry_dict.set_item("seq_variance_ratio", py.None())?,
+        }
         entry_dict.set_item("sample_count", entry.sample_count)?;
         entry_dict.set_item("seq_sample_count", entry.seq_sample_count)?;
         entry_dict.set_item("samples", PyList::new_bound(py, entry.samples))?;
@@ -3090,19 +3337,40 @@ fn kahan_step(sum: &mut f64, comp: &mut f64, value: f64) {
     *sum = t;
 }
 
+#[inline]
+fn kahan_step_f32(sum: &mut f32, comp: &mut f32, value: f32) {
+    let y = value - *comp;
+    let t = *sum + y;
+    *comp = (t - *sum) - y;
+    *sum = t;
+}
+
+#[inline]
+fn add_row_inplace_f32(dst: &mut [f32], src: &[f32]) {
+    if !simd::add_assign_inplace_f32(dst, src) {
+        for (d, &s) in dst.iter_mut().zip(src.iter()) {
+            *d += s;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::test_support::ensure_python_initialized;
 
     fn array_f64(data: Vec<f64>, shape: Vec<usize>) -> NumericArray<f64> {
+        ensure_python_initialized();
         NumericArray::new_owned(data, shape)
     }
 
     fn array_f32(data: Vec<f32>, shape: Vec<usize>) -> NumericArray<f32> {
+        ensure_python_initialized();
         NumericArray::new_owned(data, shape)
     }
 
     fn array_i32(data: Vec<i32>, shape: Vec<usize>) -> NumericArray<i32> {
+        ensure_python_initialized();
         NumericArray::new_owned(data, shape)
     }
 
@@ -3192,21 +3460,64 @@ fn kahan_accumulate_row_f64(sums: &mut [f64], comps: &mut [f64], row: &[f64]) {
     }
 }
 
-fn kahan_accumulate_row_f32(sums: &mut [f64], comps: &mut [f64], row: &[f32]) {
+fn kahan_accumulate_row_f32_native(sums: &mut [f32], comps: &mut [f32], row: &[f32]) {
     for (idx, &value) in row.iter().enumerate() {
-        kahan_step(&mut sums[idx], &mut comps[idx], value as f64);
+        kahan_step_f32(&mut sums[idx], &mut comps[idx], value);
     }
 }
 
-fn accumulate_row_simple_f32(sums: &mut [f64], row: &[f32]) {
-    for (dst, &value) in sums.iter_mut().zip(row.iter()) {
-        *dst += value as f64;
-    }
-}
-
-fn accumulate_axis0_simd_f32(data: &[f32], rows: usize, cols: usize) -> Option<Vec<f64>> {
+fn accumulate_axis0_simd_f32(data: &[f32], rows: usize, cols: usize) -> Option<Vec<f32>> {
     if rows == 0 || cols == 0 {
         return Some(vec![0.0; cols]);
+    }
+    let elements = rows.checked_mul(cols)?;
+    if elements != data.len() {
+        return None;
+    }
+    if rows >= AXIS0_COLUMN_SIMD_MIN_ROWS
+        && cols >= AXIS0_COLUMN_SIMD_MIN_COLS
+        && cols <= AXIS0_SIMD_COL_LIMIT
+    {
+        let large_enough_for_parallel = rows >= 768 || cols >= 1024;
+        if large_enough_for_parallel
+            && rows >= AXIS0_PAR_MIN_ROWS
+            && rows * cols >= PARALLEL_MIN_ELEMENTS
+        {
+            if let Some(pool) = thread_pool() {
+                use rayon::prelude::*;
+                let threads = pool.current_num_threads().max(1);
+                let chunk_rows = ((rows + threads - 1) / threads).max(AXIS0_PAR_MIN_ROWS);
+                let totals = pool.install(|| {
+                    data.par_chunks(chunk_rows * cols)
+                        .map(|chunk| {
+                            let chunk_row_count = chunk.len() / cols;
+                            simd::reduce_axis0_columns_f32(chunk, chunk_row_count, cols)
+                                .unwrap_or_else(|| {
+                                    let mut tmp = vec![0.0f32; cols];
+                                    for row in chunk.chunks_exact(cols) {
+                                        add_row_inplace_f32(&mut tmp, row);
+                                    }
+                                    tmp
+                                })
+                        })
+                        .reduce(
+                            || vec![0.0f32; cols],
+                            |mut acc, partial| {
+                                if !simd::add_assign_inplace_f32(&mut acc, partial.as_slice()) {
+                                    for (dst, &value) in acc.iter_mut().zip(partial.iter()) {
+                                        *dst += value;
+                                    }
+                                }
+                                acc
+                            },
+                        )
+                });
+                return Some(totals);
+            }
+        }
+        if let Some(values) = simd::reduce_axis0_columns_f32(data, rows, cols) {
+            return Some(values);
+        }
     }
     let mut totals = vec![0.0f32; cols];
     let mut iter = data.chunks_exact(cols);
@@ -3220,7 +3531,43 @@ fn accumulate_axis0_simd_f32(data: &[f32], rows: usize, cols: usize) -> Option<V
             return None;
         }
     }
-    Some(totals.into_iter().map(|value| value as f64).collect())
+    Some(totals)
+}
+
+fn finalize_axis0_f32(
+    sums: Vec<f32>,
+    comps: Option<Vec<f32>>,
+    rows: usize,
+    cols: usize,
+    op: Reduction,
+    parallel_used: bool,
+) -> AxisOutcome {
+    let mut values = Vec::with_capacity(cols);
+    match comps {
+        Some(mut corrections) => {
+            if corrections.len() != cols {
+                corrections.resize(cols, 0.0);
+            }
+            for idx in 0..cols {
+                values.push((sums[idx] + corrections[idx]) as f64);
+            }
+        }
+        None => {
+            for value in sums {
+                values.push(value as f64);
+            }
+        }
+    }
+    if matches!(op, Reduction::Mean) {
+        let inv = 1.0 / rows as f64;
+        for total in &mut values {
+            *total *= inv;
+        }
+    }
+    AxisOutcome {
+        values,
+        parallel: parallel_used,
+    }
 }
 
 fn recommended_accumulators(len: usize) -> usize {

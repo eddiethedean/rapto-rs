@@ -219,6 +219,35 @@ pub fn add_assign_inplace_f32(acc: &mut [f32], row: &[f32]) -> bool {
     false
 }
 
+pub fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Option<Vec<f32>> {
+    if cols == 0 {
+        return Some(Vec::new());
+    }
+    let elements = rows.checked_mul(cols)?;
+    if elements != data.len() {
+        return None;
+    }
+    if rows == 0 {
+        return Some(vec![0.0; cols]);
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::arch::is_x86_feature_detected!("avx2") {
+            return Some(unsafe { x86::reduce_axis0_columns_f32(data, rows, cols) });
+        }
+        return None;
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        return Some(unsafe { neon::reduce_axis0_columns_f32(data, rows, cols) });
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (data, rows, cols);
+        None
+    }
+}
+
 #[cfg(target_arch = "x86_64")]
 pub fn add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) -> bool {
     if lhs.len() != rhs.len() || lhs.len() != out.len() {
@@ -430,8 +459,11 @@ mod x86 {
     const LANES_F64: usize = 4;
     const LANES_F32: usize = 8;
     const PREFETCH_DISTANCE_F32: usize = LANES_F32 * 8;
+    const PREFETCH_DISTANCE_F64: usize = LANES_F64 * 8;
     const MAX_ACCUMULATORS_F64: usize = 6;
     const MAX_ACCUMULATORS_F32: usize = 8;
+    const COLUMN_BLOCK: usize = LANES_F32 * 4;
+    const PREFETCH_ROWS: usize = 4;
 
     #[target_feature(enable = "avx2")]
     pub unsafe fn reduce_sum_f64(input: &[f64], accumulators: usize) -> f64 {
@@ -474,6 +506,114 @@ mod x86 {
             index += 1;
         }
         total
+    }
+
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+        debug_assert_eq!(rows.saturating_mul(cols), data.len());
+        let mut out = vec![0.0f32; cols];
+        let mut col = 0usize;
+        let stride = cols;
+        let base_ptr = data.as_ptr();
+
+        while col + COLUMN_BLOCK <= cols {
+            let mut acc0 = _mm256_setzero_ps();
+            let mut acc1 = _mm256_setzero_ps();
+            let mut acc2 = _mm256_setzero_ps();
+            let mut acc3 = _mm256_setzero_ps();
+            let mut row_ptr = base_ptr.add(col);
+            for row_idx in 0..rows {
+                if row_idx + PREFETCH_ROWS < rows {
+                    _mm_prefetch(
+                        row_ptr.add(stride * PREFETCH_ROWS) as *const i8,
+                        _MM_HINT_T0,
+                    );
+                }
+                acc0 = _mm256_add_ps(acc0, _mm256_loadu_ps(row_ptr));
+                acc1 = _mm256_add_ps(acc1, _mm256_loadu_ps(row_ptr.add(LANES_F32)));
+                acc2 = _mm256_add_ps(acc2, _mm256_loadu_ps(row_ptr.add(LANES_F32 * 2)));
+                acc3 = _mm256_add_ps(acc3, _mm256_loadu_ps(row_ptr.add(LANES_F32 * 3)));
+                row_ptr = row_ptr.add(stride);
+            }
+
+            let mut buf0 = [0.0f32; LANES_F32];
+            let mut buf1 = [0.0f32; LANES_F32];
+            let mut buf2 = [0.0f32; LANES_F32];
+            let mut buf3 = [0.0f32; LANES_F32];
+            _mm256_storeu_ps(buf0.as_mut_ptr(), acc0);
+            _mm256_storeu_ps(buf1.as_mut_ptr(), acc1);
+            _mm256_storeu_ps(buf2.as_mut_ptr(), acc2);
+            _mm256_storeu_ps(buf3.as_mut_ptr(), acc3);
+
+            for lane in 0..LANES_F32 {
+                out[col + lane] = buf0[lane];
+                out[col + LANES_F32 + lane] = buf1[lane];
+                out[col + LANES_F32 * 2 + lane] = buf2[lane];
+                out[col + LANES_F32 * 3 + lane] = buf3[lane];
+            }
+
+            col += COLUMN_BLOCK;
+        }
+
+        while col + (LANES_F32 * 2) <= cols {
+            let mut acc0 = _mm256_setzero_ps();
+            let mut acc1 = _mm256_setzero_ps();
+            let mut row_ptr = base_ptr.add(col);
+            for row_idx in 0..rows {
+                if row_idx + PREFETCH_ROWS < rows {
+                    _mm_prefetch(
+                        row_ptr.add(stride * PREFETCH_ROWS) as *const i8,
+                        _MM_HINT_T0,
+                    );
+                }
+                acc0 = _mm256_add_ps(acc0, _mm256_loadu_ps(row_ptr));
+                acc1 = _mm256_add_ps(acc1, _mm256_loadu_ps(row_ptr.add(LANES_F32)));
+                row_ptr = row_ptr.add(stride);
+            }
+            let mut buf0 = [0.0f32; LANES_F32];
+            let mut buf1 = [0.0f32; LANES_F32];
+            _mm256_storeu_ps(buf0.as_mut_ptr(), acc0);
+            _mm256_storeu_ps(buf1.as_mut_ptr(), acc1);
+            for lane in 0..LANES_F32 {
+                out[col + lane] = buf0[lane];
+                out[col + LANES_F32 + lane] = buf1[lane];
+            }
+            col += LANES_F32 * 2;
+        }
+
+        while col + LANES_F32 <= cols {
+            let mut acc = _mm256_setzero_ps();
+            let mut row_ptr = base_ptr.add(col);
+            for row_idx in 0..rows {
+                if row_idx + PREFETCH_ROWS < rows {
+                    _mm_prefetch(
+                        row_ptr.add(stride * PREFETCH_ROWS) as *const i8,
+                        _MM_HINT_T0,
+                    );
+                }
+                acc = _mm256_add_ps(acc, _mm256_loadu_ps(row_ptr));
+                row_ptr = row_ptr.add(stride);
+            }
+            let mut buf = [0.0f32; LANES_F32];
+            _mm256_storeu_ps(buf.as_mut_ptr(), acc);
+            for lane in 0..LANES_F32 {
+                out[col + lane] = buf[lane];
+            }
+            col += LANES_F32;
+        }
+
+        if col < cols {
+            let remaining = cols - col;
+            let mut row_ptr = base_ptr.add(col);
+            for _ in 0..rows {
+                for offset in 0..remaining {
+                    *out.get_unchecked_mut(col + offset) += *row_ptr.add(offset);
+                }
+                row_ptr = row_ptr.add(stride);
+            }
+        }
+
+        out
     }
 
     #[target_feature(enable = "avx2")]
@@ -738,6 +878,30 @@ mod x86 {
         let scalar_v = _mm256_set1_ps(scalar);
 
         let mut i = 0usize;
+        let unroll = LANES_F32 * 4;
+        while i + unroll <= len {
+            let base = ptr_in.add(i);
+            if i + PREFETCH_DISTANCE_F32 < len {
+                _mm_prefetch(
+                    ptr_in.add(i + PREFETCH_DISTANCE_F32) as *const i8,
+                    _MM_HINT_T0,
+                );
+            }
+            let a0 = _mm256_loadu_ps(base);
+            let a1 = _mm256_loadu_ps(base.add(LANES_F32));
+            let a2 = _mm256_loadu_ps(base.add(LANES_F32 * 2));
+            let a3 = _mm256_loadu_ps(base.add(LANES_F32 * 3));
+            let c0 = _mm256_add_ps(a0, scalar_v);
+            let c1 = _mm256_add_ps(a1, scalar_v);
+            let c2 = _mm256_add_ps(a2, scalar_v);
+            let c3 = _mm256_add_ps(a3, scalar_v);
+            let out_base = ptr_out.add(i);
+            _mm256_storeu_ps(out_base, c0);
+            _mm256_storeu_ps(out_base.add(LANES_F32), c1);
+            _mm256_storeu_ps(out_base.add(LANES_F32 * 2), c2);
+            _mm256_storeu_ps(out_base.add(LANES_F32 * 3), c3);
+            i += unroll;
+        }
         while i + LANES_F32 <= len {
             let a = _mm256_loadu_ps(ptr_in.add(i));
             let c = _mm256_add_ps(a, scalar_v);
@@ -759,6 +923,30 @@ mod x86 {
         let factor_v = _mm256_set1_pd(factor);
 
         let mut i = 0usize;
+        let unroll = LANES_F64 * 4;
+        while i + unroll <= len {
+            let base = ptr_in.add(i);
+            if i + PREFETCH_DISTANCE_F64 < len {
+                _mm_prefetch(
+                    ptr_in.add(i + PREFETCH_DISTANCE_F64) as *const i8,
+                    _MM_HINT_T0,
+                );
+            }
+            let a0 = _mm256_loadu_pd(base);
+            let a1 = _mm256_loadu_pd(base.add(LANES_F64));
+            let a2 = _mm256_loadu_pd(base.add(LANES_F64 * 2));
+            let a3 = _mm256_loadu_pd(base.add(LANES_F64 * 3));
+            let c0 = _mm256_mul_pd(a0, factor_v);
+            let c1 = _mm256_mul_pd(a1, factor_v);
+            let c2 = _mm256_mul_pd(a2, factor_v);
+            let c3 = _mm256_mul_pd(a3, factor_v);
+            let out_base = ptr_out.add(i);
+            _mm256_storeu_pd(out_base, c0);
+            _mm256_storeu_pd(out_base.add(LANES_F64), c1);
+            _mm256_storeu_pd(out_base.add(LANES_F64 * 2), c2);
+            _mm256_storeu_pd(out_base.add(LANES_F64 * 3), c3);
+            i += unroll;
+        }
         while i + LANES_F64 <= len {
             let a = _mm256_loadu_pd(ptr_in.add(i));
             let c = _mm256_mul_pd(a, factor_v);
@@ -853,14 +1041,43 @@ mod x86 {
         cols: usize,
         out: &mut [f32],
     ) {
+        let enable_prefetch = rows >= 1024 || cols >= 1024;
         for row in 0..rows {
             let scalar = *col_values.get_unchecked(row);
             let scalar_v = _mm256_set1_ps(scalar);
             let base = row * cols;
             let mut col = 0usize;
+            if enable_prefetch && row + PREFETCH_ROWS < rows {
+                _mm_prefetch(
+                    input.as_ptr().add((row + PREFETCH_ROWS) * cols) as *const i8,
+                    _MM_HINT_T0,
+                );
+            }
+            while col + LANES_F32 * 4 <= cols {
+                let offset = base + col;
+                let ptr_in = input.as_ptr().add(offset);
+                if enable_prefetch && col + PREFETCH_DISTANCE_F32 < cols {
+                    _mm_prefetch(ptr_in.add(PREFETCH_DISTANCE_F32) as *const i8, _MM_HINT_T0);
+                }
+                let a0 = _mm256_loadu_ps(ptr_in);
+                let a1 = _mm256_loadu_ps(ptr_in.add(LANES_F32));
+                let a2 = _mm256_loadu_ps(ptr_in.add(LANES_F32 * 2));
+                let a3 = _mm256_loadu_ps(ptr_in.add(LANES_F32 * 3));
+                let c0 = _mm256_add_ps(a0, scalar_v);
+                let c1 = _mm256_add_ps(a1, scalar_v);
+                let c2 = _mm256_add_ps(a2, scalar_v);
+                let c3 = _mm256_add_ps(a3, scalar_v);
+                let ptr_out = out.as_mut_ptr().add(offset);
+                _mm256_storeu_ps(ptr_out, c0);
+                _mm256_storeu_ps(ptr_out.add(LANES_F32), c1);
+                _mm256_storeu_ps(ptr_out.add(LANES_F32 * 2), c2);
+                _mm256_storeu_ps(ptr_out.add(LANES_F32 * 3), c3);
+                col += LANES_F32 * 4;
+            }
             while col + LANES_F32 <= cols {
                 let offset = base + col;
-                let a = _mm256_loadu_ps(input.as_ptr().add(offset));
+                let ptr_in = input.as_ptr().add(offset);
+                let a = _mm256_loadu_ps(ptr_in);
                 let c = _mm256_add_ps(a, scalar_v);
                 _mm256_storeu_ps(out.as_mut_ptr().add(offset), c);
                 col += LANES_F32;
@@ -917,6 +1134,9 @@ mod neon {
     const MAX_ACCUMULATORS_F64: usize = 4;
     const MAX_ACCUMULATORS_F32: usize = 8;
     const PREFETCH_DISTANCE_F32: usize = LANES_F32 * 16;
+    const PREFETCH_DISTANCE_F64: usize = LANES_F64 * 16;
+    const COLUMN_BLOCK: usize = LANES_F32 * 4;
+    const PREFETCH_ROWS: usize = 4;
 
     #[target_feature(enable = "neon")]
     pub unsafe fn reduce_sum_f64(input: &[f64], accumulators: usize) -> f64 {
@@ -958,6 +1178,123 @@ mod neon {
             index += 1;
         }
         total
+    }
+
+    #[target_feature(enable = "neon")]
+    pub unsafe fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+        debug_assert_eq!(rows.saturating_mul(cols), data.len());
+        let mut out = vec![0.0f32; cols];
+        let stride = cols;
+        let base_ptr = data.as_ptr();
+        let mut col = 0usize;
+
+        while col + COLUMN_BLOCK <= cols {
+            let mut acc0 = vdupq_n_f32(0.0);
+            let mut acc1 = vdupq_n_f32(0.0);
+            let mut acc2 = vdupq_n_f32(0.0);
+            let mut acc3 = vdupq_n_f32(0.0);
+            let mut row_ptr = base_ptr.add(col);
+            for row_idx in 0..rows {
+                if row_idx + PREFETCH_ROWS < rows {
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) row_ptr.add(stride * PREFETCH_ROWS),
+                            options(readonly, nostack)
+                        );
+                    }
+                }
+                acc0 = vaddq_f32(acc0, vld1q_f32(row_ptr));
+                acc1 = vaddq_f32(acc1, vld1q_f32(row_ptr.add(LANES_F32)));
+                acc2 = vaddq_f32(acc2, vld1q_f32(row_ptr.add(LANES_F32 * 2)));
+                acc3 = vaddq_f32(acc3, vld1q_f32(row_ptr.add(LANES_F32 * 3)));
+                row_ptr = row_ptr.add(stride);
+            }
+            let mut buf0 = [0.0f32; LANES_F32];
+            let mut buf1 = [0.0f32; LANES_F32];
+            let mut buf2 = [0.0f32; LANES_F32];
+            let mut buf3 = [0.0f32; LANES_F32];
+            vst1q_f32(buf0.as_mut_ptr(), acc0);
+            vst1q_f32(buf1.as_mut_ptr(), acc1);
+            vst1q_f32(buf2.as_mut_ptr(), acc2);
+            vst1q_f32(buf3.as_mut_ptr(), acc3);
+            for lane in 0..LANES_F32 {
+                out[col + lane] = buf0[lane];
+                out[col + LANES_F32 + lane] = buf1[lane];
+                out[col + LANES_F32 * 2 + lane] = buf2[lane];
+                out[col + LANES_F32 * 3 + lane] = buf3[lane];
+            }
+            col += COLUMN_BLOCK;
+        }
+
+        while col + (LANES_F32 * 2) <= cols {
+            let mut acc0 = vdupq_n_f32(0.0);
+            let mut acc1 = vdupq_n_f32(0.0);
+            let mut row_ptr = base_ptr.add(col);
+            for row_idx in 0..rows {
+                if row_idx + PREFETCH_ROWS < rows {
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) row_ptr.add(stride * PREFETCH_ROWS),
+                            options(readonly, nostack)
+                        );
+                    }
+                }
+                acc0 = vaddq_f32(acc0, vld1q_f32(row_ptr));
+                acc1 = vaddq_f32(acc1, vld1q_f32(row_ptr.add(LANES_F32)));
+                row_ptr = row_ptr.add(stride);
+            }
+            let mut buf0 = [0.0f32; LANES_F32];
+            let mut buf1 = [0.0f32; LANES_F32];
+            vst1q_f32(buf0.as_mut_ptr(), acc0);
+            vst1q_f32(buf1.as_mut_ptr(), acc1);
+            for lane in 0..LANES_F32 {
+                out[col + lane] = buf0[lane];
+                out[col + LANES_F32 + lane] = buf1[lane];
+            }
+            col += LANES_F32 * 2;
+        }
+
+        while col + LANES_F32 <= cols {
+            let mut acc = vdupq_n_f32(0.0);
+            let mut row_ptr = base_ptr.add(col);
+            for row_idx in 0..rows {
+                if row_idx + PREFETCH_ROWS < rows {
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) row_ptr.add(stride * PREFETCH_ROWS),
+                            options(readonly, nostack)
+                        );
+                    }
+                }
+                acc = vaddq_f32(acc, vld1q_f32(row_ptr));
+                row_ptr = row_ptr.add(stride);
+            }
+            let mut buf = [0.0f32; LANES_F32];
+            vst1q_f32(buf.as_mut_ptr(), acc);
+            for lane in 0..LANES_F32 {
+                out[col + lane] = buf[lane];
+            }
+            col += LANES_F32;
+        }
+
+        if col < cols {
+            let remaining = cols - col;
+            let mut row_ptr = base_ptr.add(col);
+            for _ in 0..rows {
+                for offset in 0..remaining {
+                    *out.get_unchecked_mut(col + offset) += *row_ptr.add(offset);
+                }
+                row_ptr = row_ptr.add(stride);
+            }
+        }
+
+        out
     }
 
     #[target_feature(enable = "neon")]
@@ -1075,6 +1412,34 @@ mod neon {
         let scalar_v = vdupq_n_f32(scalar);
 
         let mut i = 0usize;
+        let unroll = LANES_F32 * 4;
+        while i + unroll <= len {
+            let base = ptr_in.add(i);
+            #[cfg(target_arch = "aarch64")]
+            {
+                if i + PREFETCH_DISTANCE_F64 < len {
+                    core::arch::asm!(
+                        "prfm pldl1keep, [{addr}]",
+                        addr = in(reg) base.add(PREFETCH_DISTANCE_F64),
+                        options(readonly, nostack)
+                    );
+                }
+            }
+            let a0 = vld1q_f32(base);
+            let a1 = vld1q_f32(base.add(LANES_F32));
+            let a2 = vld1q_f32(base.add(LANES_F32 * 2));
+            let a3 = vld1q_f32(base.add(LANES_F32 * 3));
+            let c0 = vaddq_f32(a0, scalar_v);
+            let c1 = vaddq_f32(a1, scalar_v);
+            let c2 = vaddq_f32(a2, scalar_v);
+            let c3 = vaddq_f32(a3, scalar_v);
+            let out_base = ptr_out.add(i);
+            vst1q_f32(out_base, c0);
+            vst1q_f32(out_base.add(LANES_F32), c1);
+            vst1q_f32(out_base.add(LANES_F32 * 2), c2);
+            vst1q_f32(out_base.add(LANES_F32 * 3), c3);
+            i += unroll;
+        }
         while i + LANES_F32 <= len {
             let a = vld1q_f32(ptr_in.add(i));
             let c = vaddq_f32(a, scalar_v);
@@ -1096,13 +1461,40 @@ mod neon {
         let factor_v = vdupq_n_f64(factor);
 
         let mut i = 0usize;
+        let unroll = LANES_F64 * 4;
+        while i + unroll <= len {
+            let base = ptr_in.add(i);
+            #[cfg(target_arch = "aarch64")]
+            {
+                if i + PREFETCH_DISTANCE_F32 < len {
+                    core::arch::asm!(
+                        "prfm pldl1keep, [{addr}]",
+                        addr = in(reg) base.add(PREFETCH_DISTANCE_F32),
+                        options(readonly, nostack)
+                    );
+                }
+            }
+            let a0 = vld1q_f64(base);
+            let a1 = vld1q_f64(base.add(LANES_F64));
+            let a2 = vld1q_f64(base.add(LANES_F64 * 2));
+            let a3 = vld1q_f64(base.add(LANES_F64 * 3));
+            let c0 = vmulq_f64(a0, factor_v);
+            let c1 = vmulq_f64(a1, factor_v);
+            let c2 = vmulq_f64(a2, factor_v);
+            let c3 = vmulq_f64(a3, factor_v);
+            let out_base = ptr_out.add(i);
+            vst1q_f64(out_base, c0);
+            vst1q_f64(out_base.add(LANES_F64), c1);
+            vst1q_f64(out_base.add(LANES_F64 * 2), c2);
+            vst1q_f64(out_base.add(LANES_F64 * 3), c3);
+            i += unroll;
+        }
         while i + LANES_F64 <= len {
             let a = vld1q_f64(ptr_in.add(i));
             let c = vmulq_f64(a, factor_v);
             vst1q_f64(ptr_out.add(i), c);
             i += LANES_F64;
         }
-
         while i < len {
             *ptr_out.add(i) = *ptr_in.add(i) * factor;
             i += 1;
@@ -1194,14 +1586,55 @@ mod neon {
         cols: usize,
         out: &mut [f32],
     ) {
+        let enable_prefetch = rows >= 1024 || cols >= 1024;
         for row in 0..rows {
             let scalar = *col_values.get_unchecked(row);
             let scalar_v = vdupq_n_f32(scalar);
             let base = row * cols;
             let mut col = 0usize;
+            if enable_prefetch && row + PREFETCH_ROWS < rows {
+                #[cfg(target_arch = "aarch64")]
+                {
+                    core::arch::asm!(
+                        "prfm pldl1keep, [{addr}]",
+                        addr = in(reg) input.as_ptr().add((row + PREFETCH_ROWS) * cols),
+                        options(readonly, nostack)
+                    );
+                }
+            }
+            let unroll = LANES_F32 * 4;
+            while col + unroll <= cols {
+                let offset = base + col;
+                let ptr_in = input.as_ptr().add(offset);
+                #[cfg(target_arch = "aarch64")]
+                {
+                    if enable_prefetch && col + PREFETCH_DISTANCE_F32 < cols {
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) ptr_in.add(PREFETCH_DISTANCE_F32),
+                            options(readonly, nostack)
+                        );
+                    }
+                }
+                let a0 = vld1q_f32(ptr_in);
+                let a1 = vld1q_f32(ptr_in.add(LANES_F32));
+                let a2 = vld1q_f32(ptr_in.add(LANES_F32 * 2));
+                let a3 = vld1q_f32(ptr_in.add(LANES_F32 * 3));
+                let c0 = vaddq_f32(a0, scalar_v);
+                let c1 = vaddq_f32(a1, scalar_v);
+                let c2 = vaddq_f32(a2, scalar_v);
+                let c3 = vaddq_f32(a3, scalar_v);
+                let ptr_out = out.as_mut_ptr().add(offset);
+                vst1q_f32(ptr_out, c0);
+                vst1q_f32(ptr_out.add(LANES_F32), c1);
+                vst1q_f32(ptr_out.add(LANES_F32 * 2), c2);
+                vst1q_f32(ptr_out.add(LANES_F32 * 3), c3);
+                col += unroll;
+            }
             while col + LANES_F32 <= cols {
                 let offset = base + col;
-                let a = vld1q_f32(input.as_ptr().add(offset));
+                let ptr_in = input.as_ptr().add(offset);
+                let a = vld1q_f32(ptr_in);
                 let c = vaddq_f32(a, scalar_v);
                 vst1q_f32(out.as_mut_ptr().add(offset), c);
                 col += LANES_F32;

@@ -3,7 +3,7 @@ use crate::tiling::TileSpec;
 
 const DIRECT_REDUCTION_LIMIT: usize = 1 << 20;
 const DIRECT_PARALLEL_MIN_ELEMENTS: usize = 1 << 21;
-const DIRECT_MIN_ROWS_PER_CHUNK: usize = 128;
+const DIRECT_MIN_ROWS_PER_CHUNK: usize = 96;
 pub(crate) const SMALL_DIRECT_THRESHOLD: usize = 1 << 12;
 
 fn recommended_accumulators(len: usize, max: usize) -> usize {

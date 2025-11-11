@@ -135,6 +135,16 @@ def main(argv: List[str] | None = None) -> int:
                 f"[axis0] shape={shape:<9} dtype={dtype:<7} "
                 f"raptors={raptors_ms:>7.3f} ms numpy={numpy_ms:>7.3f} ms speedup={speedup:>6.2f}x"
             )
+            if dtype == "float32" and speedup is not None:
+                cols = case.get("shape", [0, 0])[1] if len(case.get("shape", [])) > 1 else 0
+                if cols <= 1024:
+                    assert (
+                        speedup >= 1.05
+                    ), f"float32 axis-0 speedup regression: {shape} reported {speedup:.2f}x"
+                else:
+                    assert (
+                        speedup >= 0.65
+                    ), f"float32 axis-0 large-shape regression: {shape} reported {speedup:.2f}x"
 
     return 0
 

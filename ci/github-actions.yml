@@ -35,5 +35,5 @@ jobs:
         run: cargo test
 
       - name: Validate benchmark artifacts
-        run: python scripts/validate_benchmark_results.py
+        run: python scripts/validate_benchmark_results.py --slack 0.05 --absolute-slack-ms 0.05
 

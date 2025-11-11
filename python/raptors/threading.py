@@ -13,6 +13,10 @@ class AdaptiveThreshold:
     recommended_cutover: Optional[int]
     median_elements_per_ms: float
     seq_median_elements_per_ms: float
+    p95_elements_per_ms: Optional[float]
+    seq_p95_elements_per_ms: Optional[float]
+    variance_ratio: Optional[float]
+    seq_variance_ratio: Optional[float]
     sample_count: int
     seq_sample_count: int
     samples: List[float]
@@ -72,6 +76,26 @@ def _build_adaptive_thresholds(payload) -> Dict[str, AdaptiveThreshold]:
             median_elements_per_ms=float(details.get("median_elements_per_ms", 0.0)),
             seq_median_elements_per_ms=float(
                 details.get("seq_median_elements_per_ms", 0.0)
+            ),
+            p95_elements_per_ms=(
+                float(details["p95_elements_per_ms"])
+                if details.get("p95_elements_per_ms") not in (None, "null")
+                else None
+            ),
+            seq_p95_elements_per_ms=(
+                float(details["seq_p95_elements_per_ms"])
+                if details.get("seq_p95_elements_per_ms") not in (None, "null")
+                else None
+            ),
+            variance_ratio=(
+                float(details["variance_ratio"])
+                if details.get("variance_ratio") not in (None, "null")
+                else None
+            ),
+            seq_variance_ratio=(
+                float(details["seq_variance_ratio"])
+                if details.get("seq_variance_ratio") not in (None, "null")
+                else None
             ),
             sample_count=int(details.get("sample_count", 0)),
             seq_sample_count=int(details.get("seq_sample_count", 0)),

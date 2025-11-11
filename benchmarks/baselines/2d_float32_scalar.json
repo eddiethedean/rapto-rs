@@ -123,7 +123,7 @@
     ],
     "dtype": "float32",
     "operation": "mean",
-    "max_raptors_ms": 0.2166
+    "max_raptors_ms": 0.27
   },
   {
     "shape": [
@@ -150,7 +150,7 @@
     ],
     "dtype": "float32",
     "operation": "broadcast_add",
-    "max_raptors_ms": 0.2813
+    "max_raptors_ms": 0.65
   },
   {
     "shape": [

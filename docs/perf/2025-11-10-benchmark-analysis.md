@@ -2,51 +2,49 @@
 
 ## Summary
 
-Fresh benchmark runs on Apple silicon (`/opt/anaconda3` Python 3.12, SIMD forced, `--repeats 7`) show clear improvements for global reductions and column broadcasts, but several workloads remain slower than NumPy. Highlights (NumPy vs. Raptors mean wall time, milliseconds):
+Fresh runs on Apple silicon (Python 3.11, SIMD forced) show that the outstanding float64 mid-size regressions are resolved and the small float32 axis reducers now clear NumPy. Key deltas (median of `--warmup 5 --repeats 20` micro-runs unless noted):
 
-| Shape | Dtype     | Operation        | NumPy | Raptors | Δ | Notes |
-|-------|-----------|------------------|-------|---------|---|-------|
-| 512²  | float64   | `sum`            | 0.03  | 0.04    | +0.01 | Regression smaller but still behind |
-| 512²  | float64   | `mean_axis0`     | 0.04  | 0.03    | -0.01 | Now faster than NumPy |
-| 1024² | float64   | `sum`            | 0.13  | 0.26    | +0.13 | Direct SIMD path still loses |
-| 1024² | float64   | `broadcast_add`  | 1.27  | 0.66    | -0.61 | >1.9× speedup after SIMD tuning |
-| 2048² | float64   | `scale`          | 3.23  | 3.59    | +0.36 | SIMD scaling needs further work |
-| 1024² | float32   | `mean_axis0`     | 0.08  | 0.13    | +0.05 | Axis reducers for f32 remain costly |
-| 2048² | float32   | `mean_axis0`     | 0.29  | 0.42    | +0.13 | Rayon disabled, still slower |
-| 2048² | float32   | `scale`          | 0.37  | 0.44    | +0.07 | SIMD scaling lag |
+- 1024² float32 `mean_axis0`: **0.05 ms vs 0.08 ms** (1.56×) – f32-native accumulators + SIMD column folds.
+- 2048² float32 `mean_axis0`: **0.21 ms vs 0.25 ms** (1.14×) – parallel column reducers kept.
+- 1024² float64 `mean`: **0.10 ms vs 0.13 ms** (1.26×) – tiled reducer no longer bottlenecked.
+- 2048² float64 `scale`: **~1.30 ms vs 2.35 ms** (≈1.8×) – wider unroll, prefetch, and row-level Rayon.
+- 1024² float32 `broadcast_add`: **0.28 ms vs 0.30 ms** (1.06×) – column broadcasts now go parallel.
+- 512² float32 `broadcast_add`: **0.04 ms vs 0.03 ms** (0.85×) – still a remaining gap, though reduced from 0.72×.
+- 512² float64 `scale`: **0.15 ms vs 0.14 ms** (0.92×, up from 0.69×) as the tiny sequential fast path kicks in.
+- 512² float32 `scale`: **0.02 ms vs 0.02 ms** (~1.2×) after the same tiny fast path.
 
-Scalar fallback retains similar gaps (e.g., `sum @ 2048² float32` ≈0.26 ms vs. NumPy 0.20–0.22 ms) but now stays under renewed baseline thresholds.
+Scalar fallbacks stay within their baselines; residual gaps are concentrated in the smallest column broadcasts and mid-size float64 scale variance.
 
 ## Observations
 
 ### Global Reductions (`sum` / `mean`)
 
-- A new “direct” SIMD fast path now handles arrays up to 262 k elements (512²), removing the large overhead previously introduced by the tiled reducer. This cuts `sum(512²)` from ~1.3 ms to ~0.04 ms.
-- Larger shapes still route through the tiled/parallel path. For 1024² we remain slower than NumPy: the Rayon fan-out and partial-buffer bookkeeping dominate the simple contiguous loop NumPy uses.
-- Accumulator counts remain high (5–8 lanes) which hurts cache residency for moderate matrices; we now clamp the rotating buffer to `min(rows, accumulators)` to reduce churn.
+- 512² float64 reductions stay in the stack fast path (~0.024 ms) while the tiled reducer now wins by ~25 % at 1024² thanks to smaller direct chunks.
+- Global means reuse the same architecture for sum; residual noise at 1024² is now gearing from input variance rather than the reducer.
+- Scalar fallbacks remain comfortably below their JSON baselines.
 
 ### Axis Reductions (`mean_axis0` / `mean_axis1`)
 
-- Parallel execution for axis reducers is now gated by a higher per-axis cutover (e.g., float64 axis-0 requires ≥2048 rows) to avoid Rayon overhead on 512²/1024² shapes.
-- Sequential row sums use explicit SIMD accumulators, removing the earlier `iter().sum()` bottleneck. float64 axis reducers now beat NumPy for 512² and 2048².
-- float32 axis reducers still lag: `mean_axis0` @ 2048² ≈0.42 ms vs. NumPy 0.29 ms. The remaining cost comes from promoting `f32` values to `f64` and the lack of a dedicated SIMD column kernel.
+- float32 axis‑0 avoids f64 promotion entirely; sequential SIMD handles 512² (1.3–1.4×) while column-fold + Rayon handles ≥1024² (1.1–1.6×).
+- Telemetry gating guards against over-eager threading—parallel only kicks in when rows or cols exceed the 768/1024 guardrails.
+- float64 axis reducers pick up the float32 plumbing without regressions.
 
 ### Broadcast & Scale Kernels
 
-- Column broadcasts now leverage SIMD inside the Rayon fallback, producing >1.9× speedup for 1024² float64 and eliminating the previous baseline failures. float32 broadcasts are borderline (~1.09× at 2048²) and still worth revisiting.
-- Scaling remains our weakest kernel: float64 2048² sits at ~3.6 ms vs. NumPy ~3.2 ms, and float32 2048² is ~0.44 ms vs. 0.37 ms. The SIMD helpers do not parallelise across rows yet, so we rely on a single-core loop.
+- Column broadcasts now choose between sequential SIMD and per-block Rayon. 1024² and 2048² float32 editions are ≥1× (the latter hits ~3×); 512² still trails (~0.85×), so NEON/x86 micro-kernels for the tiniest cases remain on the shortlist.
+- Scale kernels gained a dedicated sequential path for matrices ≤512² while keeping the row-parallel SIMD path for large shapes. 512² float64 climbs to ~0.9×, float32 clears ~1.2×, and 2K matrices still benefit from Rayon.
 
 ### Adaptive Threading Heuristics
 
-- Global reducers now record telemetry for the direct/tiled paths, enabling adaptive cutovers for future tuning. Axis reducers still skip telemetry—addressing this is a follow-up.
-- Tile descriptors continue to bias wide tiles (e.g., 96×192 on NEON); for 1024² this still produces more column tiles than we need. Future work: make tiling dynamic based on `rows`/`cols`.
+- `scale_parallel_policy` prefers sequential execution until it sees a pair of parallel wins, preventing small-case regressions.
+- `broadcast_parallel_policy` now demands at least six sequential samples before vetoing parallelism for small matrices, keeping 512² sequential while letting the 1K/2K cases scale out.
+- Latest snapshot lives at `docs/perf/2025-11-10-threading-after-axis-scale.json` for regression triage.
 
 ## Next Steps
 
-1. **Global reducers:** keep parallel sums for ≥1024² but revisit Rayon's chunk sizes—current tiling still doubles NumPy’s runtime for 1024².
-2. **float32 axis reducers:** avoid `f32`→`f64` promotion by keeping partial sums in `f32` when accuracy permits, and add SIMD column kernels for `mean_axis0`.
-3. **Scaling kernels:** experiment with row-parallel scaling (Rayon + SIMD) and tune accumulator usage to close the remaining 10–15% gap.
-4. **Telemetry & CI:** log axis reducer events so adaptive thresholds converge, and track benchmark JSON artefacts in CI for historical comparison.
+1. **Mid-size scaling:** Nudge `scale_parallel_policy` further so 1024² float32 clears 1× without giving back the 2K wins; investigate variance sources in the float64 path.
+2. **Small column broadcasts:** Micro-tune the NEON kernel (alignment + prefetch) so 512² float32 matches the x86 gains.
+3. **Regression guardrails:** Refresh baselines with the new medians, keep the validator in CI, and add a smoke test for the column broadcast parallel path.
 
-These findings guide the algorithmic work planned for Step 2 (tile/accumulator tuning, specialised axis paths) and Step 3 (benchmark reruns and CI tightening).
+These refinements keep the focus on locking in the new wins while trimming the remaining mid-size scaling regression.
 
