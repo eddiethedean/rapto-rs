@@ -1234,25 +1234,26 @@ mod neon {
     pub(super) const TILED_MIN_ROWS_F32: usize = 64;
     pub(super) const TILED_MIN_COLS_F32: usize = COL_TILE_F32;
 
-    #[target_feature(enable = "neon")]
-    pub unsafe fn reduce_sum_f64(input: &[f64], accumulators: usize) -> f64 {
+    #[inline(always)]
+    unsafe fn reduce_sum_f64_fixed<const ACC: usize>(input: &[f64]) -> f64 {
+        debug_assert!(ACC >= 1 && ACC <= MAX_ACCUMULATORS_F64);
+
         let len = input.len();
         if len == 0 {
             return 0.0;
         }
 
-        let acc_count = accumulators.clamp(1, MAX_ACCUMULATORS_F64);
-        let mut regs = [vdupq_n_f64(0.0); MAX_ACCUMULATORS_F64];
-        let mut index = 0usize;
+        let mut regs: [float64x2_t; ACC] = [vdupq_n_f64(0.0); ACC];
         let ptr = input.as_ptr();
-        let step = acc_count * LANES_F64;
+        let mut index = 0usize;
+        let step = ACC * LANES_F64;
 
         while index + step <= len {
-            let mut offset = index;
-            for slot in 0..acc_count {
-                let vec = vld1q_f64(ptr.add(offset));
-                regs[slot] = vaddq_f64(regs[slot], vec);
-                offset += LANES_F64;
+            let mut offset = 0usize;
+            while offset < ACC {
+                let vec = vld1q_f64(ptr.add(index + offset * LANES_F64));
+                regs[offset] = vaddq_f64(regs[offset], vec);
+                offset += 1;
             }
             index += step;
         }
@@ -1266,14 +1267,26 @@ mod neon {
         regs[0] = vaddq_f64(regs[0], tail);
 
         let mut total = 0.0;
-        for slot in 0..acc_count {
+        let mut slot = 0usize;
+        while slot < ACC {
             total += vaddvq_f64(regs[slot]);
+            slot += 1;
         }
         while index < len {
             total += *ptr.add(index);
             index += 1;
         }
         total
+    }
+
+    #[target_feature(enable = "neon")]
+    pub unsafe fn reduce_sum_f64(input: &[f64], accumulators: usize) -> f64 {
+        match accumulators.clamp(1, MAX_ACCUMULATORS_F64) {
+            4 => reduce_sum_f64_fixed::<4>(input),
+            3 => reduce_sum_f64_fixed::<3>(input),
+            2 => reduce_sum_f64_fixed::<2>(input),
+            _ => reduce_sum_f64_fixed::<1>(input),
+        }
     }
 
     #[target_feature(enable = "neon")]

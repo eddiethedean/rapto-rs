@@ -5,6 +5,7 @@ const DIRECT_REDUCTION_LIMIT: usize = 1 << 20;
 const DIRECT_PARALLEL_MIN_ELEMENTS: usize = 1 << 21;
 const DIRECT_MIN_ROWS_PER_CHUNK: usize = 96;
 pub(crate) const SMALL_DIRECT_THRESHOLD: usize = 1 << 12;
+const F64_PAR_CHUNK: usize = 1 << 14;
 
 fn recommended_accumulators(len: usize, max: usize) -> usize {
     if len >= 1 << 22 {
@@ -76,35 +77,17 @@ pub fn reduce_full_f64(
 
     let allow_parallel = allow_parallel || elements >= DIRECT_PARALLEL_MIN_ELEMENTS;
 
-    if elements <= DIRECT_REDUCTION_LIMIT {
-        let direct_pool = if allow_parallel { pool } else { None };
-        let total = direct_sum_f64(data, rows, cols, direct_pool);
-        return ReduceOutcome {
-            value: op.finalize(total, elements),
-            tiles_processed: 1,
-            parallel: false,
-            partial_buffer: 1,
-        };
-    }
-
-    let spec = TileSpec::for_shape(rows.max(1), cols.max(1));
-    let tiles_processed = estimate_tiles(rows, cols, &spec);
-    let partial_buffer = partial_buffer_len(&spec, rows);
-
-    let mut parallel_used = false;
-    let total = if allow_parallel {
-        if let Some(pool) = pool {
-            if rows >= spec.row_block * 2 {
-                parallel_used = true;
-                parallel_sum_f64(data, cols, &spec, pool, partial_buffer)
-            } else {
-                sequential_sum_f64(data, cols, &spec, partial_buffer, rows)
-            }
-        } else {
-            sequential_sum_f64(data, cols, &spec, partial_buffer, rows)
-        }
+    let direct_pool = if allow_parallel { pool } else { None };
+    let (total, parallel_used) = fast_sum_f64(data, direct_pool, allow_parallel);
+    let tiles_processed = if parallel_used {
+        (data.len() + F64_PAR_CHUNK - 1) / F64_PAR_CHUNK
     } else {
-        sequential_sum_f64(data, cols, &spec, partial_buffer, rows)
+        1
+    };
+    let partial_buffer = if parallel_used {
+        F64_PAR_CHUNK.min(data.len()).max(1)
+    } else {
+        1
     };
 
     ReduceOutcome {
@@ -174,32 +157,33 @@ pub fn reduce_full_f32(
     }
 }
 
-fn direct_sum_f64(data: &[f64], rows: usize, cols: usize, pool: Option<&rayon::ThreadPool>) -> f64 {
-    if data.len() <= SMALL_DIRECT_THRESHOLD {
-        return data.iter().copied().sum();
+fn fast_sum_f64(
+    data: &[f64],
+    pool: Option<&rayon::ThreadPool>,
+    allow_parallel: bool,
+) -> (f64, bool) {
+    if data.is_empty() {
+        return (0.0, false);
     }
-    if let Some(pool) = pool {
-        let elements = rows.saturating_mul(cols);
-        let threads = pool.current_num_threads().max(1);
-        let chunk_rows = (rows / threads).max(1);
-        if elements >= DIRECT_PARALLEL_MIN_ELEMENTS || chunk_rows >= DIRECT_MIN_ROWS_PER_CHUNK {
-            let chunk_len = cols
-                .saturating_mul(chunk_rows)
-                .max(cols.saturating_mul(DIRECT_MIN_ROWS_PER_CHUNK.min(rows)));
-            return pool.install(|| {
+
+    if allow_parallel && data.len() >= DIRECT_PARALLEL_MIN_ELEMENTS {
+        if let Some(pool) = pool {
+            let total = pool.install(|| {
                 use rayon::prelude::*;
-                data.par_chunks(chunk_len)
+                data.par_chunks(F64_PAR_CHUNK)
                     .map(|chunk| {
-                        let acc = recommended_accumulators(chunk.len(), 8);
-                        simd::reduce_sum_f64(chunk, acc)
+                        simd::reduce_sum_f64(chunk, recommended_accumulators(chunk.len(), 8))
                             .unwrap_or_else(|| chunk.iter().copied().sum())
                     })
                     .sum()
             });
+            return (total, true);
         }
     }
-    let acc = recommended_accumulators(data.len(), 8);
-    simd::reduce_sum_f64(data, acc).unwrap_or_else(|| data.iter().copied().sum())
+
+    let total = simd::reduce_sum_f64(data, recommended_accumulators(data.len(), 8))
+        .unwrap_or_else(|| data.iter().copied().sum());
+    (total, false)
 }
 
 fn direct_sum_f32(data: &[f32], rows: usize, cols: usize, pool: Option<&rayon::ThreadPool>) -> f64 {
@@ -228,50 +212,6 @@ fn direct_sum_f32(data: &[f32], rows: usize, cols: usize, pool: Option<&rayon::T
     }
     let acc = recommended_accumulators(data.len(), 8);
     simd::reduce_sum_f32(data, acc).unwrap_or_else(|| data.iter().map(|&v| v as f64).sum())
-}
-
-fn sequential_sum_f64(
-    data: &[f64],
-    cols: usize,
-    spec: &TileSpec,
-    buffer: usize,
-    rows: usize,
-) -> f64 {
-    if cols >= 1024 {
-        let mut total = 0.0f64;
-        let mut comp = 0.0f64;
-        for row in data.chunks_exact(cols) {
-            let sum = simd::reduce_sum_f64(row, recommended_accumulators(row.len(), 8))
-                .unwrap_or_else(|| row.iter().copied().sum());
-            kahan_add(&mut total, &mut comp, sum);
-        }
-        return total + comp;
-    }
-    let tile_cols = aligned_tile_cols(spec, cols);
-    let slots = buffer.max(1).min(rows.max(1));
-    let mut partials = vec![0.0f64; slots];
-    let mut comps = vec![0.0f64; slots];
-    let mut cursor = 0usize;
-
-    for row in data.chunks(cols) {
-        let mut col = 0usize;
-        while col < row.len() {
-            let end = (col + tile_cols).min(row.len());
-            let slice = &row[col..end];
-            let sum = simd::reduce_sum_f64(slice, spec.accumulators)
-                .unwrap_or_else(|| slice.iter().sum::<f64>());
-            kahan_add(&mut partials[cursor], &mut comps[cursor], sum);
-            cursor = (cursor + 1) % partials.len();
-            col = end;
-        }
-    }
-
-    let mut total = 0.0f64;
-    let mut comp = 0.0f64;
-    for (value, c) in partials.into_iter().zip(comps.into_iter()) {
-        kahan_add(&mut total, &mut comp, value + c);
-    }
-    total
 }
 
 fn sequential_sum_f32(
@@ -306,41 +246,6 @@ fn sequential_sum_f32(
         kahan_add(&mut total, &mut comp, value + c);
     }
     total
-}
-
-fn parallel_sum_f64(
-    data: &[f64],
-    cols: usize,
-    spec: &TileSpec,
-    pool: &rayon::ThreadPool,
-    buffer: usize,
-) -> f64 {
-    use rayon::prelude::*;
-
-    let chunk_elems = cols.saturating_mul(spec.row_block.max(1));
-    let (sum, comp) = pool.install(|| {
-        data.par_chunks(chunk_elems.max(1))
-            .fold(
-                || (0.0f64, 0.0f64),
-                |mut acc, chunk| {
-                    let rows = chunk.len() / cols;
-                    let value = sequential_sum_f64(chunk, cols, spec, buffer, rows);
-                    kahan_add(&mut acc.0, &mut acc.1, value);
-                    acc
-                },
-            )
-            .reduce(
-                || (0.0f64, 0.0f64),
-                |mut acc, value| {
-                    kahan_add(&mut acc.0, &mut acc.1, value.0);
-                    if value.1 != 0.0 {
-                        kahan_add(&mut acc.0, &mut acc.1, value.1);
-                    }
-                    acc
-                },
-            )
-    });
-    sum + comp
 }
 
 fn parallel_sum_f32(
