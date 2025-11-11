@@ -248,6 +248,32 @@ pub fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Optio
     }
 }
 
+pub fn reduce_axis0_tiled_f32(data: &[f32], rows: usize, cols: usize) -> Option<Vec<f32>> {
+    if cols == 0 {
+        return Some(Vec::new());
+    }
+    if rows == 0 {
+        return Some(vec![0.0; cols]);
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if rows >= x86::TILED_MIN_ROWS_F32
+            && cols >= x86::TILED_MIN_COLS_F32
+            && std::arch::is_x86_feature_detected!("avx2")
+        {
+            return Some(unsafe { x86::reduce_axis0_tiled_f32(data, rows, cols) });
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if rows >= neon::TILED_MIN_ROWS_F32 && cols >= neon::TILED_MIN_COLS_F32 {
+            return Some(unsafe { neon::reduce_axis0_tiled_f32(data, rows, cols) });
+        }
+    }
+    let _ = (data, rows, cols);
+    None
+}
+
 #[cfg(target_arch = "x86_64")]
 pub fn add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) -> bool {
     if lhs.len() != rhs.len() || lhs.len() != out.len() {
@@ -464,6 +490,11 @@ mod x86 {
     const MAX_ACCUMULATORS_F32: usize = 8;
     const COLUMN_BLOCK: usize = LANES_F32 * 4;
     const PREFETCH_ROWS: usize = 4;
+    const ROW_TILE_F32: usize = 128;
+    const COL_TILE_F32: usize = COLUMN_BLOCK;
+    const MAX_TILE_VECTORS_F32: usize = COL_TILE_F32 / LANES_F32;
+    pub(super) const TILED_MIN_ROWS_F32: usize = 64;
+    pub(super) const TILED_MIN_COLS_F32: usize = COL_TILE_F32;
 
     #[target_feature(enable = "avx2")]
     pub unsafe fn reduce_sum_f64(input: &[f64], accumulators: usize) -> f64 {
@@ -611,6 +642,66 @@ mod x86 {
                 }
                 row_ptr = row_ptr.add(stride);
             }
+        }
+
+        out
+    }
+
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn reduce_axis0_tiled_f32(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+        debug_assert_eq!(rows.saturating_mul(cols), data.len());
+        let mut out = vec![0.0f32; cols];
+        if rows == 0 || cols == 0 {
+            return out;
+        }
+        let stride = cols;
+        let base_ptr = data.as_ptr();
+        let out_ptr = out.as_mut_ptr();
+
+        let mut row_start = 0usize;
+        while row_start < rows {
+            let block_rows = (rows - row_start).min(ROW_TILE_F32);
+            let mut col = 0usize;
+            while col < cols {
+                let width = (cols - col).min(COL_TILE_F32);
+                let vec_count = width / LANES_F32;
+                let tail_start = vec_count * LANES_F32;
+                let tail = width - tail_start;
+                let mut vec_acc = [_mm256_setzero_ps(); MAX_TILE_VECTORS_F32];
+                let mut tail_acc = [0.0f32; LANES_F32];
+
+                let mut r = 0usize;
+                while r < block_rows {
+                    let ptr = base_ptr.add((row_start + r) * stride + col);
+                    for v in 0..vec_count {
+                        let offset = v * LANES_F32;
+                        let vec = _mm256_loadu_ps(ptr.add(offset));
+                        vec_acc[v] = _mm256_add_ps(vec_acc[v], vec);
+                    }
+                    if tail > 0 {
+                        for t in 0..tail {
+                            tail_acc[t] += *ptr.add(tail_start + t);
+                        }
+                    }
+                    r += 1;
+                }
+
+                for v in 0..vec_count {
+                    let dst = out_ptr.add(col + v * LANES_F32);
+                    let prev = _mm256_loadu_ps(dst);
+                    let sum = _mm256_add_ps(prev, vec_acc[v]);
+                    _mm256_storeu_ps(dst, sum);
+                }
+                if tail > 0 {
+                    for t in 0..tail {
+                        let idx = col + tail_start + t;
+                        *out_ptr.add(idx) += tail_acc[t];
+                    }
+                }
+
+                col += width;
+            }
+            row_start += block_rows;
         }
 
         out
@@ -1137,6 +1228,11 @@ mod neon {
     const PREFETCH_DISTANCE_F64: usize = LANES_F64 * 16;
     const COLUMN_BLOCK: usize = LANES_F32 * 4;
     const PREFETCH_ROWS: usize = 4;
+    const ROW_TILE_F32: usize = 128;
+    const COL_TILE_F32: usize = COLUMN_BLOCK;
+    const MAX_TILE_VECTORS_F32: usize = COL_TILE_F32 / LANES_F32;
+    pub(super) const TILED_MIN_ROWS_F32: usize = 64;
+    pub(super) const TILED_MIN_COLS_F32: usize = COL_TILE_F32;
 
     #[target_feature(enable = "neon")]
     pub unsafe fn reduce_sum_f64(input: &[f64], accumulators: usize) -> f64 {
@@ -1292,6 +1388,66 @@ mod neon {
                 }
                 row_ptr = row_ptr.add(stride);
             }
+        }
+
+        out
+    }
+
+    #[target_feature(enable = "neon")]
+    pub unsafe fn reduce_axis0_tiled_f32(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+        debug_assert_eq!(rows.saturating_mul(cols), data.len());
+        let mut out = vec![0.0f32; cols];
+        if rows == 0 || cols == 0 {
+            return out;
+        }
+        let stride = cols;
+        let base_ptr = data.as_ptr();
+        let out_ptr = out.as_mut_ptr();
+
+        let mut row_start = 0usize;
+        while row_start < rows {
+            let block_rows = (rows - row_start).min(ROW_TILE_F32);
+            let mut col = 0usize;
+            while col < cols {
+                let width = (cols - col).min(COL_TILE_F32);
+                let vec_count = width / LANES_F32;
+                let tail_start = vec_count * LANES_F32;
+                let tail = width - tail_start;
+                let mut vec_acc = [vdupq_n_f32(0.0); MAX_TILE_VECTORS_F32];
+                let mut tail_acc = [0.0f32; LANES_F32];
+
+                let mut r = 0usize;
+                while r < block_rows {
+                    let ptr = base_ptr.add((row_start + r) * stride + col);
+                    for v in 0..vec_count {
+                        let offset = v * LANES_F32;
+                        let vec = vld1q_f32(ptr.add(offset));
+                        vec_acc[v] = vaddq_f32(vec_acc[v], vec);
+                    }
+                    if tail > 0 {
+                        for t in 0..tail {
+                            tail_acc[t] += *ptr.add(tail_start + t);
+                        }
+                    }
+                    r += 1;
+                }
+
+                for v in 0..vec_count {
+                    let dst = out_ptr.add(col + v * LANES_F32);
+                    let prev = vld1q_f32(dst);
+                    let sum = vaddq_f32(prev, vec_acc[v]);
+                    vst1q_f32(dst, sum);
+                }
+                if tail > 0 {
+                    for t in 0..tail {
+                        let idx = col + tail_start + t;
+                        *out_ptr.add(idx) += tail_acc[t];
+                    }
+                }
+
+                col += width;
+            }
+            row_start += block_rows;
         }
 
         out

@@ -12,9 +12,10 @@ name = "raptors"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["python-extension"]
+default = ["python-extension", "matrixmultiply-backend"]
 python-extension = ["pyo3/extension-module"]
 test-suite = ["pyo3/auto-initialize"]
+matrixmultiply-backend = ["matrixmultiply"]
 
 [dependencies]
 pyo3 = "0.21"
@@ -22,6 +23,7 @@ numpy = "0.21"
 num-traits = "0.2"
 wide = "0.7"
 rayon = "1.9"
+matrixmultiply = { version = "0.3", optional = true }
 
 [dev-dependencies]
 libloading = "0.8"

@@ -2,14 +2,15 @@
 
 ## Latest Measurements (RAPTORS_THREADS=8, see notes per run)
 
-- `float32` @ `1024²` `mean_axis0`: **0.05 ms** (NumPy 0.08 ms, 1.56×) — sequential SIMD for small, Rayon column fold for ≥1 K rows.  
-  (`compare_numpy_raptors.py --warmup 5 --repeats 20`)
-- `float32` @ `2048²` `broadcast_add`: **0.35 ms** (NumPy 0.51 ms, 1.46×) — block-parallel column kernel.  
-  (`compare_numpy_raptors.py --warmup 2 --repeats 5`)
-- `float64` @ `2048²` `scale`: **≈1.3 ms** (NumPy ≈2.4 ms, ~1.8×) — wider unroll + row parallelism.  
-  (median across multiple runs; see `benchmarks/results/latest_full_simd.json`)
-- `float64` @ `512²` `scale`: **0.15 ms** (NumPy 0.14 ms, ~0.92×) — the new tiny sequential fast path replaces the old 0.69× regression.
-- Small gaps remain: `float32` @ `512²` `broadcast_add` ≈0.85× (tiny column path) and `float32` @ `1024²` `scale` still hovers around parity.
+- `float32` @ `512²` `mean_axis0`: **0.02 ms** (NumPy 0.03 ms, 1.48×) — SIMD lane reductions stay favored for smaller matrices.  
+  (`benchmarks/run_axis0_suite.py --warmup 1 --repeats 4`)
+- `float32` @ `2048²` `mean_axis0`: **0.33 ms** (NumPy 0.27 ms, 0.82×) — enabling the `matrixmultiply` backend lifts the large-column reducer above the CI guard rail (toggle with `RAPTORS_MATRIXMULTIPLY=1`).  
+  (`benchmarks/run_axis0_suite.py --warmup 1 --repeats 4`)
+- `float32` @ `512²` `scale`: **0.02 ms** (NumPy 0.02 ms, 1.01×) — baseline SIMD path. Experimental GEMM-backed scaling is gated behind `RAPTORS_MATRIXMULTIPLY_SCALE=1`.  
+  (`compare_numpy_raptors.py --suite 2d --simd-mode force --warmup 1 --repeats 7`)
+- `float64` @ `1024²` `scale`: **0.40 ms** (NumPy 0.48 ms, 1.20×) — widened SIMD loop with Rayon chunking beats NumPy at medium sizes.  
+  (`compare_numpy_raptors.py --suite 2d --simd-mode force --warmup 1 --repeats 7`)
+- Column broadcast add remains close: `float32` @ `2048²` ≈0.62× by default; a matrixmultiply-powered prototype exists but is currently disabled pending accuracy tuning.
 
 The SIMD suite continues to use `--simd-mode force`; pinning threads via `RAPTORS_THREADS=8` is now recommended to limit scheduling variance during regression checks.
 
@@ -34,6 +35,13 @@ python scripts/compare_numpy_raptors.py --suite 2d --simd-mode force \
   --output-json benchmarks/results/local_simd.json
 python scripts/validate_benchmark_results.py --results-dir benchmarks/results \
   --baseline-dir benchmarks/baselines --slack 0.05 --absolute-slack-ms 0.05
+```
+
+After generating JSON artefacts, summarize the regressions with:
+
+```bash
+python scripts/summarize_benchmarks.py --sub-one \
+  --output-csv benchmarks/results/summary_subone.csv
 ```
 
 Repeat the command with the float32 and scalar baselines to mirror CI coverage:
@@ -63,6 +71,9 @@ python scripts/validate_benchmark_results.py --slack 0.05 --absolute-slack-ms 0.
 
 - `RAPTORS_SIMD=0|1` — force scalar/SIMD execution.
 - `RAPTORS_THREADS=<n>` — pin Rayon pool size.
+- `RAPTORS_MATRIXMULTIPLY=0|1` — enable/disable the matrixmultiply-backed axis-0 reducers (default: on).
+- `RAPTORS_MATRIXMULTIPLY_SCALE=0|1` — opt-in to experimental GEMM-based scaling (default: off).
+- `RAPTORS_MATRIXMULTIPLY_BROADCAST=0|1` — opt-in to experimental column broadcast replication via matrixmultiply (default: off).
 - `raptors.threading_info()` — Python helper returning live heuristics:
   - Baseline cutovers per dtype.
   - Adaptive median and P95 throughput samples (elements/ms) for global reducers *and* per-operation telemetry covering `scale`, broadcast row/column variants, and axis reducers, plus variance ratios (P95 ÷ median) to highlight jitter.

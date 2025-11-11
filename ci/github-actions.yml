@@ -37,3 +37,6 @@ jobs:
       - name: Validate benchmark artifacts
         run: python scripts/validate_benchmark_results.py --slack 0.05 --absolute-slack-ms 0.05
 
+      - name: Summarize benchmark regressions
+        run: python scripts/summarize_benchmarks.py --sub-one --output-csv benchmarks/results/ci_summary.csv
+

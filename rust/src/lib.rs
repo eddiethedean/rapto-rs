@@ -1,5 +1,5 @@
 use std::{
-    cmp::Ordering,
+    cmp::{self, Ordering},
     collections::{HashMap, VecDeque},
     convert::TryInto,
     env,
@@ -110,6 +110,15 @@ const TRACKED_DTYPES: &[&str] = &["float64", "float32", "int32"];
 const SMALL_AXIS_PARALLEL_ROWS: usize = 512;
 const AXIS0_SIMD_COL_LIMIT: usize = 2048;
 const AXIS0_PAR_MIN_ROWS: usize = 64;
+const AXIS0_PAR_MIN_COL_CHUNK: usize = 64;
+const AXIS0_PAR_MAX_COL_CHUNK: usize = 512;
+#[allow(dead_code)]
+const AXIS0_LARGE_TILED_ROWS: usize = 1536;
+#[allow(dead_code)]
+const AXIS0_LARGE_TILED_COLS: usize = 1024;
+const MATRIX_AXIS0_ROW_THRESHOLD: usize = 4096;
+const MATRIX_AXIS0_COL_THRESHOLD: usize = 1024;
+const MATRIX_AXIS0_COL_BLOCK: usize = 256;
 const SCALE_PAR_MIN_ROWS: usize = 32;
 const BROADCAST_PAR_MIN_ROWS: usize = 48;
 const BROADCAST_PAR_MIN_COLS: usize = 64;
@@ -123,6 +132,18 @@ const SCALE_PAR_MIN_ELEMS_F64: usize = 1 << 19;
 const OPERATION_SCALE: &str = "scale";
 const OPERATION_BROADCAST_ROW: &str = "broadcast_row";
 const OPERATION_BROADCAST_COL: &str = "broadcast_col";
+
+#[cfg(feature = "matrixmultiply-backend")]
+#[inline]
+fn matrix_backend_enabled() -> bool {
+    true
+}
+
+#[cfg(not(feature = "matrixmultiply-backend"))]
+#[inline]
+fn matrix_backend_enabled() -> bool {
+    false
+}
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 enum AxisKind {
@@ -2542,7 +2563,36 @@ fn reduce_axis0_f32(
         return finalize_axis0_f32(sums, Some(comps), rows, cols, op, false);
     }
 
+    if rows >= AXIS0_LARGE_TILED_ROWS && cols >= AXIS0_LARGE_TILED_COLS {
+        if let Some(simd_totals) = simd::reduce_axis0_tiled_f32(data, rows, cols) {
+            return finalize_axis0_f32(simd_totals, None, rows, cols, op, false);
+        }
+    }
+
+    if matrix_backend_enabled()
+        && rows >= MATRIX_AXIS0_ROW_THRESHOLD
+        && cols >= MATRIX_AXIS0_COL_THRESHOLD
+    {
+        #[cfg(feature = "matrixmultiply-backend")]
+        {
+            let sums = reduce_axis0_columns_matrix(data, rows, cols);
+            return finalize_axis0_f32(sums, None, rows, cols, op, false);
+        }
+    }
+
+    if allow_parallel && cols >= AXIS0_PAR_MIN_COL_CHUNK && rows >= AXIS0_PAR_MIN_ROWS {
+        if rows.saturating_mul(cols) >= PARALLEL_MIN_ELEMENTS {
+            if let Some(pool) = thread_pool() {
+                let sums = reduce_axis0_parallel_tiled_f32(pool, data, rows, cols);
+                return finalize_axis0_f32(sums, None, rows, cols, op, true);
+            }
+        }
+    }
+
     if cols <= AXIS0_SIMD_COL_LIMIT {
+        if let Some(simd_totals) = simd::reduce_axis0_tiled_f32(data, rows, cols) {
+            return finalize_axis0_f32(simd_totals, None, rows, cols, op, false);
+        }
         if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
             return finalize_axis0_f32(simd_totals, None, rows, cols, op, false);
         }
@@ -2602,7 +2652,9 @@ fn reduce_axis0_f32(
     }
 
     if rows <= SMALL_AXIS_PARALLEL_ROWS {
-        let sums = if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
+        let sums = if let Some(simd_totals) = simd::reduce_axis0_tiled_f32(data, rows, cols) {
+            simd_totals
+        } else if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
             simd_totals
         } else {
             let mut seq = vec![0.0f32; cols];
@@ -2655,7 +2707,10 @@ fn reduce_axis0_f32(
 
     if sums.is_empty() {
         parallel_used = false;
-        if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
+        if let Some(simd_totals) = simd::reduce_axis0_tiled_f32(data, rows, cols) {
+            sums = simd_totals;
+            comps = vec![0.0f32; cols];
+        } else if let Some(simd_totals) = accumulate_axis0_simd_f32(data, rows, cols) {
             sums = simd_totals;
             comps = vec![0.0f32; cols];
         } else {
@@ -3356,8 +3411,8 @@ fn add_row_inplace_f32(dst: &mut [f32], src: &[f32]) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::test_support::ensure_python_initialized;
+    use super::*;
 
     fn array_f64(data: Vec<f64>, shape: Vec<usize>) -> NumericArray<f64> {
         ensure_python_initialized();
@@ -3474,6 +3529,9 @@ fn accumulate_axis0_simd_f32(data: &[f32], rows: usize, cols: usize) -> Option<V
     if elements != data.len() {
         return None;
     }
+    if let Some(values) = simd::reduce_axis0_tiled_f32(data, rows, cols) {
+        return Some(values);
+    }
     if rows >= AXIS0_COLUMN_SIMD_MIN_ROWS
         && cols >= AXIS0_COLUMN_SIMD_MIN_COLS
         && cols <= AXIS0_SIMD_COL_LIMIT
@@ -3534,7 +3592,19 @@ fn accumulate_axis0_simd_f32(data: &[f32], rows: usize, cols: usize) -> Option<V
     Some(totals)
 }
 
+#[inline]
 fn finalize_axis0_f32(
+    sums: Vec<f32>,
+    comps: Option<Vec<f32>>,
+    rows: usize,
+    cols: usize,
+    op: Reduction,
+    parallel_used: bool,
+) -> AxisOutcome {
+    finalize_axis0_f32_impl(sums, comps, rows, cols, op, parallel_used)
+}
+
+fn finalize_axis0_f32_impl(
     sums: Vec<f32>,
     comps: Option<Vec<f32>>,
     rows: usize,
@@ -3600,4 +3670,117 @@ fn reduce_row_simd_f32(row: &[f32]) -> f64 {
     } else {
         row.iter().map(|&value| value as f64).sum()
     }
+}
+
+fn reduce_axis0_parallel_tiled_f32(
+    pool: &rayon::ThreadPool,
+    data: &[f32],
+    rows: usize,
+    cols: usize,
+) -> Vec<f32> {
+    let threads = pool.current_num_threads().max(1);
+    let chunk_cols = {
+        let target = (cols + threads - 1) / threads;
+        let mut value = cmp::max(AXIS0_PAR_MIN_COL_CHUNK, target)
+            .min(AXIS0_PAR_MAX_COL_CHUNK)
+            .min(cols);
+        if value % 8 != 0 {
+            value = cmp::min(cols, ((value + 7) / 8) * 8);
+        }
+        if value == 0 {
+            cols
+        } else {
+            value
+        }
+    };
+
+    let mut output = vec![0.0f32; cols];
+    pool.install(|| {
+        use rayon::prelude::*;
+        output
+            .par_chunks_mut(chunk_cols)
+            .enumerate()
+            .for_each(|(index, out_chunk)| {
+                let start_col = index * chunk_cols;
+                accumulate_axis0_chunk_f32(data, rows, cols, start_col, out_chunk);
+            });
+    });
+
+    output
+}
+
+fn accumulate_axis0_chunk_f32(
+    data: &[f32],
+    rows: usize,
+    cols: usize,
+    start_col: usize,
+    out_chunk: &mut [f32],
+) {
+    if rows == 0 || out_chunk.is_empty() {
+        out_chunk.fill(0.0);
+        return;
+    }
+
+    out_chunk.fill(0.0);
+    for row in 0..rows {
+        let offset = row * cols + start_col;
+        let slice = &data[offset..offset + out_chunk.len()];
+        if !simd::add_assign_inplace_f32(out_chunk, slice) {
+            for (dst, &value) in out_chunk.iter_mut().zip(slice.iter()) {
+                *dst += value;
+            }
+        }
+    }
+}
+
+#[cfg(feature = "matrixmultiply-backend")]
+fn reduce_axis0_columns_matrix(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    if cols == 0 {
+        return Vec::new();
+    }
+    if rows == 0 {
+        return vec![0.0f32; cols];
+    }
+
+    let mut output = vec![0.0f32; cols];
+    let ones = vec![1.0f32; rows];
+    let mut scratch = vec![0.0f32; MATRIX_AXIS0_COL_BLOCK];
+
+    for start in (0..cols).step_by(MATRIX_AXIS0_COL_BLOCK) {
+        let width = (cols - start).min(MATRIX_AXIS0_COL_BLOCK);
+        unsafe {
+            matrixmultiply::sgemm(
+                1,
+                rows,
+                width,
+                1.0,
+                ones.as_ptr(),
+                rows as isize,
+                1,
+                data.as_ptr().add(start),
+                cols as isize,
+                1,
+                0.0,
+                scratch.as_mut_ptr(),
+                width as isize,
+                1,
+            );
+        }
+        output[start..start + width].copy_from_slice(&scratch[..width]);
+    }
+
+    output
+}
+
+#[cfg(not(feature = "matrixmultiply-backend"))]
+fn reduce_axis0_columns_matrix(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    simd::reduce_axis0_tiled_f32(data, rows, cols)
+        .or_else(|| accumulate_axis0_simd_f32(data, rows, cols))
+        .unwrap_or_else(|| {
+            let mut sums = vec![0.0f32; cols];
+            for row in data.chunks_exact(cols) {
+                add_row_inplace_f32(&mut sums, row);
+            }
+            sums
+        })
 }

@@ -33,6 +33,11 @@ class LastEvent:
     partial_buffer: int
     parallel: bool
     operation: str
+    chunk_rows: Optional[int]
+    chunk_len: Optional[int]
+    chunk_count: Optional[int]
+    pool_threads: Optional[int]
+    strategy: str
 
 
 @dataclass(frozen=True)
@@ -109,6 +114,15 @@ def _build_adaptive_thresholds(payload) -> Dict[str, AdaptiveThreshold]:
 def _build_last_event(payload) -> Optional[LastEvent]:
     if not isinstance(payload, dict):
         return None
+
+    def _opt_int(value) -> Optional[int]:
+        if value in (None, "null"):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     return LastEvent(
         dtype=str(payload.get("dtype", "")),
         elements=int(payload.get("elements", 0)),
@@ -117,6 +131,11 @@ def _build_last_event(payload) -> Optional[LastEvent]:
         partial_buffer=int(payload.get("partial_buffer", 0)),
         parallel=bool(payload.get("parallel", False)),
         operation=str(payload.get("operation", "")),
+        chunk_rows=_opt_int(payload.get("chunk_rows")),
+        chunk_len=_opt_int(payload.get("chunk_len")),
+        chunk_count=_opt_int(payload.get("chunk_count")),
+        pool_threads=_opt_int(payload.get("pool_threads")),
+        strategy=str(payload.get("strategy", "")),
     )
 
 

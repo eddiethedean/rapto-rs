@@ -292,6 +292,7 @@ name = "raptors"
 version = "0.0.2"
 dependencies = [
  "libloading",
+ "matrixmultiply",
  "num-traits",
  "numpy",
  "pyo3",

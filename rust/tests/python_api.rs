@@ -55,10 +55,7 @@ print(path.resolve())
         .to_owned();
     let path = PathBuf::from(path);
     if !path.exists() {
-        panic!(
-            "Resolved libpython path does not exist: {}",
-            path.display()
-        );
+        panic!("Resolved libpython path does not exist: {}", path.display());
     }
     path
 }

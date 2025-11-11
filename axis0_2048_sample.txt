@@ -1,0 +1,339 @@
+Analysis of sampling python (pid 24734) every 1 millisecond
+Process:         python3.12 [24734]
+Path:            /opt/anaconda3/*/python3.12
+Load Address:    0x100d6c000
+Identifier:      python3.12
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  launchd [1]
+Target Type:     live task
+
+Date/Time:       2025-11-11 16:43:33.391 -0500
+Launch Time:     2025-11-11 16:43:22.539 -0500
+OS Version:      macOS 15.6.1 (24G90)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         48.7M
+Physical footprint (peak):  48.7M
+Idle exit:                  untracked
+----
+
+Call graph:
+    4088 Thread_22764933   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 4088 start  (in dyld) + 6076  [0x197432b98]
+    +   4088 main  (in python3.12) + 56  [0x100d714e4]
+    +     4088 pymain_main  (in python3.12) + 552  [0x100ff6684]
+    +       4088 Py_RunMain  (in python3.12) + 1276  [0x100ff53b4]
+    +         4088 pymain_run_stdin  (in python3.12) + 200  [0x100ff5e4c]
+    +           4088 PyRun_AnyFileExFlags  (in python3.12) + 68  [0x100fcd530]
+    +             4088 _PyRun_AnyFileObject  (in python3.12) + 80  [0x100fc9f1c]
+    +               4088 _PyRun_SimpleFileObject  (in python3.12) + 288  [0x100fca638]
+    +                 4088 pyrun_file  (in python3.12) + 156  [0x100fcac6c]
+    +                   4088 run_mod  (in python3.12) + 288  [0x100fcaef0]
+    +                     4088 PyEval_EvalCode  (in python3.12) + 260  [0x100f1aa64]
+    +                       4087 _PyEval_EvalFrameDefault  (in python3.12) + 238656  [0x100f5780c]
+    +                       ! 4087 raptors::_$LT$impl$u20$pyo3..impl_..pyclass..PyMethods$LT$raptors..RustArrayF32$GT$$u20$for$u20$pyo3..impl_..pyclass..PyClassImplCollector$LT$raptors..RustArrayF32$GT$$GT$::py_methods::ITEMS::trampoline::h7f319aad6a17e249  (in _raptors.cpython-312-darwin.so) + 72  [0x102fe4ad4]
+    +                       !   4087 pyo3::impl_::trampoline::trampoline::h3bd41fa066293d5b  (in _raptors.cpython-312-darwin.so) + 248  [0x102fb4a44]
+    +                       !     4087 raptors::RustArrayF32::__pymethod_mean_axis__::hf4a45a80d88a62a0  (in _raptors.cpython-312-darwin.so) + 292  [0x102fe63f4]
+    +                       !       4072 raptors::NumericArray$LT$T$GT$::reduce_axis::h74b084be46293e75  (in _raptors.cpython-312-darwin.so) + 1156  [0x102fdc4d4]
+    +                       !       : 4072 raptors::accumulate_axis0_rows_f32::h5476c7ac399f3afc  (in _raptors.cpython-312-darwin.so) + 656  [0x102fde5ec]
+    +                       !       :   4068 raptors::reduce_axis0_columns_matrix::h7a1a8c9e8367ae42  (in _raptors.cpython-312-darwin.so) + 236  [0x102fdefc4]
+    +                       !       :   | 2144 matrixmultiply::gemm::gemm_loop::h3ce87ae95a2cdad7  (in _raptors.cpython-312-darwin.so) + 772,764,...  [0x102f9074c,0x102f90744,...]
+    +                       !       :   | 1924 matrixmultiply::gemm::gemm_loop::h3ce87ae95a2cdad7  (in _raptors.cpython-312-darwin.so) + 2772  [0x102f90f1c]
+    +                       !       :   |   1924 matrixmultiply::gemm::masked_kernel::hf7cb32d9da070c53  (in _raptors.cpython-312-darwin.so) + 136,108,...  [0x102f91b64,0x102f91b48,...]
+    +                       !       :   2 raptors::reduce_axis0_columns_matrix::h7a1a8c9e8367ae42  (in _raptors.cpython-312-darwin.so) + 172  [0x102fdef84]
+    +                       !       :   | 2 _platform_memset_pattern16  (in libsystem_platform.dylib) + 208  [0x19780b1b0]
+    +                       !       :   1 free_small  (in libsystem_malloc.dylib) + 1060  [0x1975d6848]
+    +                       !       :   1 raptors::reduce_axis0_columns_matrix::h7a1a8c9e8367ae42  (in _raptors.cpython-312-darwin.so) + 96  [0x102fdef38]
+    +                       !       :     1 szone_malloc_should_clear  (in libsystem_malloc.dylib) + 120  [0x1975d3c0c]
+    +                       !       :       1 small_malloc_should_clear  (in libsystem_malloc.dylib) + 232  [0x1975d3e00]
+    +                       !       :         1 _platform_memset  (in libsystem_platform.dylib) + 140  [0x19780d07c]
+    +                       !       11 raptors::NumericArray$LT$T$GT$::reduce_axis::h74b084be46293e75  (in _raptors.cpython-312-darwin.so) + 1336  [0x102fdc588]
+    +                       !       : 10 raptors::finalize_axis0_f32::h5b4da6640af47b16  (in _raptors.cpython-312-darwin.so) + 384,400,...  [0x102fe04ec,0x102fe04fc,...]
+    +                       !       : 1 raptors::finalize_axis0_f32::h5b4da6640af47b16  (in _raptors.cpython-312-darwin.so) + 120  [0x102fe03e4]
+    +                       !       :   1 szone_malloc_should_clear  (in libsystem_malloc.dylib) + 120  [0x1975d3c0c]
+    +                       !       :     1 small_malloc_should_clear  (in libsystem_malloc.dylib) + 104  [0x1975d3d80]
+    +                       !       2 raptors::NumericArray$LT$T$GT$::reduce_axis::h74b084be46293e75  (in _raptors.cpython-312-darwin.so) + 1436  [0x102fdc5ec]
+    +                       !       : 2 raptors::record_axis_event::hd65c322f9e07b621  (in _raptors.cpython-312-darwin.so) + 328  [0x102fd2898]
+    +                       !       :   2 raptors::record_threading_event::h711197e79298c839  (in _raptors.cpython-312-darwin.so) + 260  [0x102fd26ac]
+    +                       !       :     2 raptors::AdaptiveThreadingState::record::h96cbf0caee3fbcc2  (in _raptors.cpython-312-darwin.so) + 140  [0x102fd13d0]
+    +                       !       :       1 raptors::AdaptiveThreadingState::push_sample::hde32f9fd3d785b1b  (in _raptors.cpython-312-darwin.so) + 76  [0x102fd1774]
+    +                       !       :       | 1 raptors::AdaptiveThreadingState::push_sample::hde32f9fd3d785b1b  (in _raptors.cpython-312-darwin.so) + 84  [0x102fd177c]
+    +                       !       :       1 raptors::AdaptiveThreadingState::push_sample::hde32f9fd3d785b1b  (in _raptors.cpython-312-darwin.so) + 0  [0x102fd1728]
+    +                       !       2 raptors::NumericArray$LT$T$GT$::reduce_axis::h74b084be46293e75  (in _raptors.cpython-312-darwin.so) + 2068  [0x102fdc864]
+    +                       !         2 raptors::NumericArray$LT$T$GT$::convert_reduction_from_f64::hf9b58c8f60d56867  (in _raptors.cpython-312-darwin.so) + 124  [0x102fde0e0]
+    +                       1 _PyEval_EvalFrameDefault  (in python3.12) + 221860  [0x100f53670]
+    +                         1 cfunction_vectorcall_NOARGS  (in python3.12) + 104  [0x100e4a7c4]
+    +                           1 time_time  (in python3.12) + 52  [0x10106040c]
+    +                             1 clock_gettime  (in libsystem_c.dylib) + 256  [0x197672854]
+    +                               1 gettimeofday  (in libsystem_c.dylib) + 56  [0x19766ab34]
+    +                                 1 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x197793ae4]
+    +                                   1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x1977920f0]
+    4088 Thread_22764960
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 blas_thread_server  (in libopenblasp-r0.3.21.dylib) + 404  [0x1035984ec]
+    +       4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +         4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764961
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 blas_thread_server  (in libopenblasp-r0.3.21.dylib) + 404  [0x1035984ec]
+    +       4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +         4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764962
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 blas_thread_server  (in libopenblasp-r0.3.21.dylib) + 404  [0x1035984ec]
+    +       4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +         4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764963
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 blas_thread_server  (in libopenblasp-r0.3.21.dylib) + 404  [0x1035984ec]
+    +       4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +         4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764964
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 blas_thread_server  (in libopenblasp-r0.3.21.dylib) + 404  [0x1035984ec]
+    +       4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +         4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764965
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 blas_thread_server  (in libopenblasp-r0.3.21.dylib) + 404  [0x1035984ec]
+    +       4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +         4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764966
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 blas_thread_server  (in libopenblasp-r0.3.21.dylib) + 404  [0x1035984ec]
+    +       4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +         4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764967
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 blas_thread_server  (in libopenblasp-r0.3.21.dylib) + 404  [0x1035984ec]
+    +       4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +         4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764968
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 blas_thread_server  (in libopenblasp-r0.3.21.dylib) + 404  [0x1035984ec]
+    +       4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +         4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764970
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 std::sys::pal::unix::thread::Thread::new::thread_start::hf0cf67e969add794  (in _raptors.cpython-312-darwin.so) + 36  [0x10301f384]
+    +       4088 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::he92747c2f829276a  (in _raptors.cpython-312-darwin.so) + 440  [0x102ff5c20]
+    +         4088 std::sys::backtrace::__rust_begin_short_backtrace::hea6d68ad046a219b  (in _raptors.cpython-312-darwin.so) + 12  [0x102ff5484]
+    +           4088 rayon_core::registry::ThreadBuilder::run::ha7992cd9f558b828  (in _raptors.cpython-312-darwin.so) + 312  [0x102ff7fcc]
+    +             4088 rayon_core::registry::WorkerThread::wait_until_cold::hdd51f1ab68d049a8  (in _raptors.cpython-312-darwin.so) + 204  [0x1030359dc]
+    +               4088 rayon_core::sleep::Sleep::sleep::h4d798a9c5274f983  (in _raptors.cpython-312-darwin.so) + 512  [0x103035cb8]
+    +                 4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +                   4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764971
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 std::sys::pal::unix::thread::Thread::new::thread_start::hf0cf67e969add794  (in _raptors.cpython-312-darwin.so) + 36  [0x10301f384]
+    +       4088 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::he92747c2f829276a  (in _raptors.cpython-312-darwin.so) + 440  [0x102ff5c20]
+    +         4088 std::sys::backtrace::__rust_begin_short_backtrace::hea6d68ad046a219b  (in _raptors.cpython-312-darwin.so) + 12  [0x102ff5484]
+    +           4088 rayon_core::registry::ThreadBuilder::run::ha7992cd9f558b828  (in _raptors.cpython-312-darwin.so) + 312  [0x102ff7fcc]
+    +             4088 rayon_core::registry::WorkerThread::wait_until_cold::hdd51f1ab68d049a8  (in _raptors.cpython-312-darwin.so) + 204  [0x1030359dc]
+    +               4088 rayon_core::sleep::Sleep::sleep::h4d798a9c5274f983  (in _raptors.cpython-312-darwin.so) + 512  [0x103035cb8]
+    +                 4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +                   4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764972
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 std::sys::pal::unix::thread::Thread::new::thread_start::hf0cf67e969add794  (in _raptors.cpython-312-darwin.so) + 36  [0x10301f384]
+    +       4088 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::he92747c2f829276a  (in _raptors.cpython-312-darwin.so) + 440  [0x102ff5c20]
+    +         4088 std::sys::backtrace::__rust_begin_short_backtrace::hea6d68ad046a219b  (in _raptors.cpython-312-darwin.so) + 12  [0x102ff5484]
+    +           4088 rayon_core::registry::ThreadBuilder::run::ha7992cd9f558b828  (in _raptors.cpython-312-darwin.so) + 312  [0x102ff7fcc]
+    +             4088 rayon_core::registry::WorkerThread::wait_until_cold::hdd51f1ab68d049a8  (in _raptors.cpython-312-darwin.so) + 204  [0x1030359dc]
+    +               4088 rayon_core::sleep::Sleep::sleep::h4d798a9c5274f983  (in _raptors.cpython-312-darwin.so) + 512  [0x103035cb8]
+    +                 4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +                   4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764973
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 std::sys::pal::unix::thread::Thread::new::thread_start::hf0cf67e969add794  (in _raptors.cpython-312-darwin.so) + 36  [0x10301f384]
+    +       4088 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::he92747c2f829276a  (in _raptors.cpython-312-darwin.so) + 440  [0x102ff5c20]
+    +         4088 std::sys::backtrace::__rust_begin_short_backtrace::hea6d68ad046a219b  (in _raptors.cpython-312-darwin.so) + 12  [0x102ff5484]
+    +           4088 rayon_core::registry::ThreadBuilder::run::ha7992cd9f558b828  (in _raptors.cpython-312-darwin.so) + 312  [0x102ff7fcc]
+    +             4088 rayon_core::registry::WorkerThread::wait_until_cold::hdd51f1ab68d049a8  (in _raptors.cpython-312-darwin.so) + 204  [0x1030359dc]
+    +               4088 rayon_core::sleep::Sleep::sleep::h4d798a9c5274f983  (in _raptors.cpython-312-darwin.so) + 512  [0x103035cb8]
+    +                 4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +                   4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764974
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 std::sys::pal::unix::thread::Thread::new::thread_start::hf0cf67e969add794  (in _raptors.cpython-312-darwin.so) + 36  [0x10301f384]
+    +       4088 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::he92747c2f829276a  (in _raptors.cpython-312-darwin.so) + 440  [0x102ff5c20]
+    +         4088 std::sys::backtrace::__rust_begin_short_backtrace::hea6d68ad046a219b  (in _raptors.cpython-312-darwin.so) + 12  [0x102ff5484]
+    +           4088 rayon_core::registry::ThreadBuilder::run::ha7992cd9f558b828  (in _raptors.cpython-312-darwin.so) + 312  [0x102ff7fcc]
+    +             4088 rayon_core::registry::WorkerThread::wait_until_cold::hdd51f1ab68d049a8  (in _raptors.cpython-312-darwin.so) + 204  [0x1030359dc]
+    +               4088 rayon_core::sleep::Sleep::sleep::h4d798a9c5274f983  (in _raptors.cpython-312-darwin.so) + 512  [0x103035cb8]
+    +                 4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +                   4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764975
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 std::sys::pal::unix::thread::Thread::new::thread_start::hf0cf67e969add794  (in _raptors.cpython-312-darwin.so) + 36  [0x10301f384]
+    +       4088 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::he92747c2f829276a  (in _raptors.cpython-312-darwin.so) + 440  [0x102ff5c20]
+    +         4088 std::sys::backtrace::__rust_begin_short_backtrace::hea6d68ad046a219b  (in _raptors.cpython-312-darwin.so) + 12  [0x102ff5484]
+    +           4088 rayon_core::registry::ThreadBuilder::run::ha7992cd9f558b828  (in _raptors.cpython-312-darwin.so) + 312  [0x102ff7fcc]
+    +             4088 rayon_core::registry::WorkerThread::wait_until_cold::hdd51f1ab68d049a8  (in _raptors.cpython-312-darwin.so) + 204  [0x1030359dc]
+    +               4088 rayon_core::sleep::Sleep::sleep::h4d798a9c5274f983  (in _raptors.cpython-312-darwin.so) + 512  [0x103035cb8]
+    +                 4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +                   4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764976
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 std::sys::pal::unix::thread::Thread::new::thread_start::hf0cf67e969add794  (in _raptors.cpython-312-darwin.so) + 36  [0x10301f384]
+    +       4088 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::he92747c2f829276a  (in _raptors.cpython-312-darwin.so) + 440  [0x102ff5c20]
+    +         4088 std::sys::backtrace::__rust_begin_short_backtrace::hea6d68ad046a219b  (in _raptors.cpython-312-darwin.so) + 12  [0x102ff5484]
+    +           4088 rayon_core::registry::ThreadBuilder::run::ha7992cd9f558b828  (in _raptors.cpython-312-darwin.so) + 312  [0x102ff7fcc]
+    +             4088 rayon_core::registry::WorkerThread::wait_until_cold::hdd51f1ab68d049a8  (in _raptors.cpython-312-darwin.so) + 204  [0x1030359dc]
+    +               4088 rayon_core::sleep::Sleep::sleep::h4d798a9c5274f983  (in _raptors.cpython-312-darwin.so) + 512  [0x103035cb8]
+    +                 4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +                   4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764977
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 std::sys::pal::unix::thread::Thread::new::thread_start::hf0cf67e969add794  (in _raptors.cpython-312-darwin.so) + 36  [0x10301f384]
+    +       4088 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::he92747c2f829276a  (in _raptors.cpython-312-darwin.so) + 440  [0x102ff5c20]
+    +         4088 std::sys::backtrace::__rust_begin_short_backtrace::hea6d68ad046a219b  (in _raptors.cpython-312-darwin.so) + 12  [0x102ff5484]
+    +           4088 rayon_core::registry::ThreadBuilder::run::ha7992cd9f558b828  (in _raptors.cpython-312-darwin.so) + 312  [0x102ff7fcc]
+    +             4088 rayon_core::registry::WorkerThread::wait_until_cold::hdd51f1ab68d049a8  (in _raptors.cpython-312-darwin.so) + 204  [0x1030359dc]
+    +               4088 rayon_core::sleep::Sleep::sleep::h4d798a9c5274f983  (in _raptors.cpython-312-darwin.so) + 512  [0x103035cb8]
+    +                 4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +                   4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764978
+    + 4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+    +   4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+    +     4088 std::sys::pal::unix::thread::Thread::new::thread_start::hf0cf67e969add794  (in _raptors.cpython-312-darwin.so) + 36  [0x10301f384]
+    +       4088 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::he92747c2f829276a  (in _raptors.cpython-312-darwin.so) + 440  [0x102ff5c20]
+    +         4088 std::sys::backtrace::__rust_begin_short_backtrace::hea6d68ad046a219b  (in _raptors.cpython-312-darwin.so) + 12  [0x102ff5484]
+    +           4088 rayon_core::registry::ThreadBuilder::run::ha7992cd9f558b828  (in _raptors.cpython-312-darwin.so) + 312  [0x102ff7fcc]
+    +             4088 rayon_core::registry::WorkerThread::wait_until_cold::hdd51f1ab68d049a8  (in _raptors.cpython-312-darwin.so) + 204  [0x1030359dc]
+    +               4088 rayon_core::sleep::Sleep::sleep::h4d798a9c5274f983  (in _raptors.cpython-312-darwin.so) + 512  [0x103035cb8]
+    +                 4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+    +                   4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+    4088 Thread_22764979
+      4088 thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+        4088 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+          4088 std::sys::pal::unix::thread::Thread::new::thread_start::hf0cf67e969add794  (in _raptors.cpython-312-darwin.so) + 36  [0x10301f384]
+            4088 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::he92747c2f829276a  (in _raptors.cpython-312-darwin.so) + 440  [0x102ff5c20]
+              4088 std::sys::backtrace::__rust_begin_short_backtrace::hea6d68ad046a219b  (in _raptors.cpython-312-darwin.so) + 12  [0x102ff5484]
+                4088 rayon_core::registry::ThreadBuilder::run::ha7992cd9f558b828  (in _raptors.cpython-312-darwin.so) + 312  [0x102ff7fcc]
+                  4088 rayon_core::registry::WorkerThread::wait_until_cold::hdd51f1ab68d049a8  (in _raptors.cpython-312-darwin.so) + 204  [0x1030359dc]
+                    4088 rayon_core::sleep::Sleep::sleep::h4d798a9c5274f983  (in _raptors.cpython-312-darwin.so) + 512  [0x103035cb8]
+                      4088 _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+                        4088 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1977953cc]
+
+Total number in stack (recursive counted multiple, when >=5):
+        19       __psynch_cvwait  (in libsystem_kernel.dylib) + 0  [0x1977953c4]
+        19       _pthread_cond_wait  (in libsystem_pthread.dylib) + 984  [0x1977d40e0]
+        19       _pthread_start  (in libsystem_pthread.dylib) + 136  [0x1977d3c0c]
+        19       thread_start  (in libsystem_pthread.dylib) + 8  [0x1977ceb80]
+        10       core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::he92747c2f829276a  (in _raptors.cpython-312-darwin.so) + 440  [0x102ff5c20]
+        10       rayon_core::registry::ThreadBuilder::run::ha7992cd9f558b828  (in _raptors.cpython-312-darwin.so) + 312  [0x102ff7fcc]
+        10       rayon_core::registry::WorkerThread::wait_until_cold::hdd51f1ab68d049a8  (in _raptors.cpython-312-darwin.so) + 204  [0x1030359dc]
+        10       rayon_core::sleep::Sleep::sleep::h4d798a9c5274f983  (in _raptors.cpython-312-darwin.so) + 512  [0x103035cb8]
+        10       std::sys::backtrace::__rust_begin_short_backtrace::hea6d68ad046a219b  (in _raptors.cpython-312-darwin.so) + 12  [0x102ff5484]
+        10       std::sys::pal::unix::thread::Thread::new::thread_start::hf0cf67e969add794  (in _raptors.cpython-312-darwin.so) + 36  [0x10301f384]
+        9       blas_thread_server  (in libopenblasp-r0.3.21.dylib) + 404  [0x1035984ec]
+
+Sort by top of stack, same collapsed (when >= 5):
+        __psynch_cvwait  (in libsystem_kernel.dylib)        77672
+        matrixmultiply::gemm::gemm_loop::h3ce87ae95a2cdad7  (in _raptors.cpython-312-darwin.so)        2144
+        matrixmultiply::gemm::masked_kernel::hf7cb32d9da070c53  (in _raptors.cpython-312-darwin.so)        1924
+        raptors::finalize_axis0_f32::h5b4da6640af47b16  (in _raptors.cpython-312-darwin.so)        10
+
+Binary Images:
+       0x100d6c000 -        0x101163ff7 +python3.12 (0) <717E71EB-8983-3CBD-AAE4-58210A4E688C> /opt/anaconda3/*/python3.12
+       0x101578000 -        0x101587fff +math.cpython-312-darwin.so (0) <950DE239-AD59-32AA-9650-B952C18926C9> /opt/anaconda3/*/math.cpython-312-darwin.so
+       0x101594000 -        0x10159ffff +_struct.cpython-312-darwin.so (0) <2C3C2CD0-0118-346C-92D6-C4EBBEC0E63E> /opt/anaconda3/*/_struct.cpython-312-darwin.so
+       0x1015b8000 -        0x1015c7ff7 +libgcc_s.1.1.dylib (0) <98FDD8D7-A24E-3CC5-8100-8B27A8CA4D19> /opt/anaconda3/*/libgcc_s.1.1.dylib
+       0x101840000 -        0x101847fff +_contextvars.cpython-312-darwin.so (0) <CB52A877-3404-3F35-AF63-7134A7406BE0> /opt/anaconda3/*/_contextvars.cpython-312-darwin.so
+       0x101854000 -        0x10185bfff +binascii.cpython-312-darwin.so (0) <0D6592A7-D8D8-3D94-B243-2D223EF30E1A> /opt/anaconda3/*/binascii.cpython-312-darwin.so
+       0x101868000 -        0x10187ffff +_datetime.cpython-312-darwin.so (0) <C81E6C4C-C400-327A-9B73-5C2168425A1E> /opt/anaconda3/*/_datetime.cpython-312-darwin.so
+       0x10189c000 -        0x1018ebfff +libquadmath.0.dylib (0) <0148B45C-55D1-335E-A6EE-032EA5CA21F8> /opt/anaconda3/*/libquadmath.0.dylib
+       0x1019f8000 -        0x101a03fff +_hashlib.cpython-312-darwin.so (0) <58D1B6E3-C5FD-3921-A8C0-997CA64E0268> /opt/anaconda3/*/_hashlib.cpython-312-darwin.so
+       0x101a10000 -        0x101a17fff +_bisect.cpython-312-darwin.so (0) <7750980B-7F19-3F07-A8B2-B11F28A55317> /opt/anaconda3/*/_bisect.cpython-312-darwin.so
+       0x101a24000 -        0x101a3fff3 +_pickle.cpython-312-darwin.so (0) <73983892-08A6-357D-B13B-3B55A74793E6> /opt/anaconda3/*/_pickle.cpython-312-darwin.so
+       0x101a50000 -        0x101a63fff +_multiarray_tests.cpython-312-darwin.so (0) <0BFD3000-EA47-36D1-8678-F6DD81D029F3> /opt/anaconda3/*/_multiarray_tests.cpython-312-darwin.so
+       0x101a74000 -        0x101a8bfff +_ctypes.cpython-312-darwin.so (0) <385BB6CF-2060-3D91-B71D-834CE9073291> /opt/anaconda3/*/_ctypes.cpython-312-darwin.so
+       0x101a9c000 -        0x101aac487 +libffi.8.dylib (0) <41675FF9-A76F-3C38-9559-DA36D2201A80> /opt/anaconda3/*/libffi.8.dylib
+       0x101abc000 -        0x101ad7ffb +_umath_linalg.cpython-312-darwin.so (0) <B67BEFA6-D8EC-366F-A224-F7EA61BA96E3> /opt/anaconda3/*/_umath_linalg.cpython-312-darwin.so
+       0x101ae8000 -        0x101afbff3 +_pocketfft_internal.cpython-312-darwin.so (0) <0B0CCE16-09AD-3C63-A711-7A300D98333C> /opt/anaconda3/*/_pocketfft_internal.cpython-312-darwin.so
+       0x101b08000 -        0x101b13ffb +_blake2.cpython-312-darwin.so (0) <A0983A47-7062-34E6-91E5-A9D278DD0D3D> /opt/anaconda3/*/_blake2.cpython-312-darwin.so
+       0x101b20000 -        0x101d7ffff +_multiarray_umath.cpython-312-darwin.so (0) <F4E03034-C256-3FA7-9943-23A30CFA4A35> /opt/anaconda3/*/_multiarray_umath.cpython-312-darwin.so
+       0x102120000 -        0x102137fff +libz.1.2.13.dylib (0) <BB5557FA-69AC-3834-9573-F8F0E376AB1C> /opt/anaconda3/*/libz.1.2.13.dylib
+       0x102144000 -        0x10214bfff +_random.cpython-312-darwin.so (0) <9AA8BF42-2E11-3BB5-8806-F5810479BA02> /opt/anaconda3/*/_random.cpython-312-darwin.so
+       0x10215c000 -        0x102183ff3 +bit_generator.cpython-312-darwin.so (0) <98AAF295-B1D5-3A9D-8E8E-7E049F77D5C2> /opt/anaconda3/*/bit_generator.cpython-312-darwin.so
+       0x102198000 -        0x10219ffff +_opcode.cpython-312-darwin.so (0) <41B2F038-6720-3CF8-8394-B81419A1818A> /opt/anaconda3/*/_opcode.cpython-312-darwin.so
+       0x1021ac000 -        0x10250bff7 +libgfortran.5.dylib (0) <211DFF67-9A4A-3A55-9EAE-8F44ADC21B8E> /opt/anaconda3/*/libgfortran.5.dylib
+       0x102538000 -        0x102563fff +_common.cpython-312-darwin.so (0) <10D929A3-7BD2-3F3A-8DE2-990F528507A4> /opt/anaconda3/*/_common.cpython-312-darwin.so
+       0x102574000 -        0x10257fffb +_sha2.cpython-312-darwin.so (0) <DB72EB18-86D5-3AB7-8600-78DEA45713EA> /opt/anaconda3/*/_sha2.cpython-312-darwin.so
+       0x10258c000 -        0x10259bfff +_sfc64.cpython-312-darwin.so (0) <9C24E5F0-F221-307C-8EDD-84B5216121DE> /opt/anaconda3/*/_sfc64.cpython-312-darwin.so
+       0x1025b0000 -        0x1025c3fff +_mt19937.cpython-312-darwin.so (0) <D6BCDB2C-DF7B-3E52-AAA0-38FDA4D7384E> /opt/anaconda3/*/_mt19937.cpython-312-darwin.so
+       0x1025e0000 -        0x10266fffb +mtrand.cpython-312-darwin.so (0) <8F229796-DB5D-33D7-AEAB-54017DF34DA6> /opt/anaconda3/*/mtrand.cpython-312-darwin.so
+       0x102788000 -        0x1027c7fff +_bounded_integers.cpython-312-darwin.so (0) <137E496D-BFD3-3BEC-BA3D-6EB8AB88EA15> /opt/anaconda3/*/_bounded_integers.cpython-312-darwin.so
+       0x1027d8000 -        0x1027ebfff +_philox.cpython-312-darwin.so (0) <D5284730-1467-3BFC-8FA1-0D065FDB9A77> /opt/anaconda3/*/_philox.cpython-312-darwin.so
+       0x1027fc000 -        0x10280ffff +_pcg64.cpython-312-darwin.so (0) <5014EF5F-1397-3ADE-BE76-4942EA735741> /opt/anaconda3/*/_pcg64.cpython-312-darwin.so
+       0x1028e4000 -        0x10298bfff +_generator.cpython-312-darwin.so (0) <A4416015-ACBB-36D7-BCA5-5243024AACAE> /opt/anaconda3/*/_generator.cpython-312-darwin.so
+       0x1029f0000 -        0x102c4386b +libcrypto.3.dylib (0) <41328E28-8880-34A0-B671-1B390E5FF16F> /opt/anaconda3/*/libcrypto.3.dylib
+       0x102f88000 -        0x103064f3b +_raptors.cpython-312-darwin.so (0) <B37D1DDC-0BE6-3FB1-B55F-712871DCB29C> /Users/*/Documents/*/_raptors.cpython-312-darwin.so
+       0x103434000 -        0x104873fef +libopenblasp-r0.3.21.dylib (0) <2361AC48-B968-30D4-90C5-D4993FC8C530> /opt/anaconda3/*/libopenblasp-r0.3.21.dylib
+       0x1973d8000 -        0x19742b893  libobjc.A.dylib (940.4) <8CA52E4D-F699-3D14-8061-EEA9D4366538> /usr/lib/libobjc.A.dylib
+       0x19742c000 -        0x1974c7577  dyld (1.0.0 - 1286.10) <3247E185-CED2-36FF-9E29-47A77C23E004> /usr/lib/dyld
+       0x1974c8000 -        0x1974cb168  libsystem_blocks.dylib (96) <BA8F0C40-B12D-3D8B-8396-FC3F8A733C27> /usr/lib/system/libsystem_blocks.dylib
+       0x1974cc000 -        0x1975168ff  libxpc.dylib (2894.140.12) <1B8951EB-68DB-37BA-9581-240B796AA872> /usr/lib/system/libxpc.dylib
+       0x197517000 -        0x1975327ff  libsystem_trace.dylib (1643.120.5) <AC8466B8-AF1D-3895-876B-228151F0DF1D> /usr/lib/system/libsystem_trace.dylib
+       0x197533000 -        0x1975d13b7  libcorecrypto.dylib (1736.140.2) <7254F3F1-A46F-30B6-934A-511B730A8FC7> /usr/lib/system/libcorecrypto.dylib
+       0x1975d2000 -        0x19761906f  libsystem_malloc.dylib (715.140.5) <85947F4E-385D-3B6D-9BF5-844EFE876D53> /usr/lib/system/libsystem_malloc.dylib
+       0x19761a000 -        0x19766075f  libdispatch.dylib (1521.140.2) <24CE0D89-4114-30C2-A81A-3DB1F5931CFF> /usr/lib/system/libdispatch.dylib
+       0x197661000 -        0x197663d1b  libsystem_featureflags.dylib (97) <856DB4EF-8C67-3842-970C-6FA814B07749> /usr/lib/system/libsystem_featureflags.dylib
+       0x197664000 -        0x1976e5243  libsystem_c.dylib (1698.140.3) <DFEA8794-80CE-37C3-8F6A-108AA1D0B1B0> /usr/lib/system/libsystem_c.dylib
+       0x1976e6000 -        0x197772ff7  libc++.1.dylib (1900.181) <643ED232-CE19-3F63-8015-0AEE768C002F> /usr/lib/libc++.1.dylib
+       0x197773000 -        0x197790fff  libc++abi.dylib (1900.181) <776A4AFB-71EE-32AB-B2EE-E6FF80818654> /usr/lib/libc++abi.dylib
+       0x197791000 -        0x1977cc653  libsystem_kernel.dylib (11417.140.69) <6E4A96AD-04B8-3E8A-B91D-087E62306246> /usr/lib/system/libsystem_kernel.dylib
+       0x1977cd000 -        0x1977d9a47  libsystem_pthread.dylib (536) <D6494BA9-171E-39FC-B1AA-28ECF87975D1> /usr/lib/system/libsystem_pthread.dylib
+       0x1977da000 -        0x197809ba3  libdyld.dylib (1286.10) <01BCB3F7-AB89-30BD-87EE-91B291EADAE8> /usr/lib/system/libdyld.dylib
+       0x19780a000 -        0x197811e0b  libsystem_platform.dylib (349.140.6) <FD19A599-8750-31F9-924F-C2810C938371> /usr/lib/system/libsystem_platform.dylib
+       0x197812000 -        0x1978416f7  libsystem_info.dylib (597) <9720B57E-A0DF-3BDD-8149-0801054B5D00> /usr/lib/system/libsystem_info.dylib
+       0x19b2d8000 -        0x19b2e2387  libsystem_darwin.dylib (1698.140.3) <8E58BBDB-E560-3AB4-8A1D-849AB83CBFC5> /usr/lib/system/libsystem_darwin.dylib
+       0x19b73a000 -        0x19b74bfeb  libsystem_notify.dylib (342) <6A411086-A1A2-349F-B9CA-348F9DCBB415> /usr/lib/system/libsystem_notify.dylib
+       0x19d73d000 -        0x19d757e8f  libsystem_networkextension.dylib (2063.140.6) <8183B684-71EB-3FB1-8378-EB830CADAE7D> /usr/lib/system/libsystem_networkextension.dylib
+       0x19d7d4000 -        0x19d7ebfdb  libsystem_asl.dylib (402) <FE29D1E8-D286-33F9-81CB-822E632D1571> /usr/lib/system/libsystem_asl.dylib
+       0x19f331000 -        0x19f3393a7  libsystem_symptoms.dylib (2022.140.4) <AABA26A2-74BC-3219-BAA3-ACC8D81D8589> /usr/lib/system/libsystem_symptoms.dylib
+       0x1a2b7e000 -        0x1a2bae38f  libsystem_containermanager.dylib (689.100.6) <24EE4AC1-5C9F-3EE0-8B4E-9D060EBCBD41> /usr/lib/system/libsystem_containermanager.dylib
+       0x1a3de3000 -        0x1a3de75df  libsystem_configuration.dylib (1351.140.5) <B1ADB810-702B-3646-8B66-EB2C288FE51A> /usr/lib/system/libsystem_configuration.dylib
+       0x1a3de8000 -        0x1a3dee47f  libsystem_sandbox.dylib (2401.140.15) <B86C6D35-683E-3156-BAB2-A422F5AFF2BD> /usr/lib/system/libsystem_sandbox.dylib
+       0x1a4df3000 -        0x1a4df5fe3  libquarantine.dylib (181.120.2) <8CE8DAD0-52D6-3F46-98EF-161E1397FB48> /usr/lib/system/libquarantine.dylib
+       0x1a5509000 -        0x1a5510033  libsystem_coreservices.dylib (178.6.1) <A4E84D5A-8D0E-3692-B888-89B9EEF8753D> /usr/lib/system/libsystem_coreservices.dylib
+       0x1a5988000 -        0x1a59c52b7  libsystem_m.dylib (3291.100.4) <0D060230-BD2F-3C8E-ACB9-8A79F5CD8EDE> /usr/lib/system/libsystem_m.dylib
+       0x1a59c6000 -        0x1a59c6c9b  libcharset.1.dylib (109.100.2) <5517E59D-AA69-3422-9AFE-4E3CA7307050> /usr/lib/libcharset.1.dylib
+       0x1a59c7000 -        0x1a59ca4e7  libmacho.dylib (1024.3) <87AB4EEF-3A18-3399-A767-C6BF4ECEDCEB> /usr/lib/system/libmacho.dylib
+       0x1a59e4000 -        0x1a59f15ef  libcommonCrypto.dylib (600035) <E6BC26C2-DED7-3C04-A670-AEDB150BDB1F> /usr/lib/system/libcommonCrypto.dylib
+       0x1a59f2000 -        0x1a59fbad7  libunwind.dylib (1900.125) <F753CC2B-775B-3567-B0C6-D2989CA9EBF4> /usr/lib/system/libunwind.dylib
+       0x1a5a04000 -        0x1a5a0e69f  libcopyfile.dylib (224) <213FA18D-6145-3615-8DB5-906B6863EAB9> /usr/lib/system/libcopyfile.dylib
+       0x1a5a0f000 -        0x1a5a1298f  libcompiler_rt.dylib (103.3) <F0F65700-8E9D-35F3-AC32-952D363190BC> /usr/lib/system/libcompiler_rt.dylib
+       0x1a5a13000 -        0x1a5a17a1b  libsystem_collections.dylib (1698.140.3) <B77BE835-646C-3F05-BDBD-7703DE140F6A> /usr/lib/system/libsystem_collections.dylib
+       0x1a5a18000 -        0x1a5a1b2c7  libsystem_secinit.dylib (153.140.2) <D15B45AD-1345-34BF-B8E3-05336C4046A0> /usr/lib/system/libsystem_secinit.dylib
+       0x1a5a1c000 -        0x1a5a1eb6f  libremovefile.dylib (81) <9BCF9A24-BECB-3DED-A78E-3A3ECD1B1757> /usr/lib/system/libremovefile.dylib
+       0x1a5a1f000 -        0x1a5a1ff27  libkeymgr.dylib (31) <B20C6921-D5BE-3BB5-B68C-32D90D629E39> /usr/lib/system/libkeymgr.dylib
+       0x1a5a20000 -        0x1a5a28d57  libsystem_dnssd.dylib (2600.140.3) <61F023F3-E2C5-3F19-BA1B-B02D7564ACC4> /usr/lib/system/libsystem_dnssd.dylib
+       0x1a5a29000 -        0x1a5a2e0b3  libcache.dylib (95) <2B900F8F-9EDE-3208-AB17-BD1385B5546A> /usr/lib/system/libcache.dylib
+       0x1a5a2f000 -        0x1a5a30ca3  libSystem.B.dylib (1351) <072C7C60-2B6C-3E07-AA56-FD1750EADC2F> /usr/lib/libSystem.B.dylib
+       0x1a5a6b000 -        0x1a5a721eb  libiconv.2.dylib (109.100.2) <621F2C06-2AF7-3EA8-AEDC-C922075CB67B> /usr/lib/libiconv.2.dylib
+       0x27ef10000 -        0x27ef17109  libRosetta.dylib (349) <4EE80AAC-8204-3BD0-AB75-EDD23DE67E2F> /usr/lib/libRosetta.dylib
+       0x28033b000 -        0x28033edeb  libsystem_darwindirectory.dylib (122) <277D32FB-F49A-3949-97A4-B190A3DF89E8> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x28033f000 -        0x280346523  libsystem_eligibility.dylib (181.140.5) <27E48AAA-644F-394A-9F62-49CEFB813716> /usr/lib/system/libsystem_eligibility.dylib
+       0x280347000 -        0x28034c6c5  libsystem_sanitizers.dylib (19) <FB86D2F7-4501-38E4-9D9A-83F960D7D7BA> /usr/lib/system/libsystem_sanitizers.dylib

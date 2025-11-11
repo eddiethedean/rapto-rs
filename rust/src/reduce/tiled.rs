@@ -237,6 +237,16 @@ fn sequential_sum_f64(
     buffer: usize,
     rows: usize,
 ) -> f64 {
+    if cols >= 1024 {
+        let mut total = 0.0f64;
+        let mut comp = 0.0f64;
+        for row in data.chunks_exact(cols) {
+            let sum = simd::reduce_sum_f64(row, recommended_accumulators(row.len(), 8))
+                .unwrap_or_else(|| row.iter().copied().sum());
+            kahan_add(&mut total, &mut comp, sum);
+        }
+        return total + comp;
+    }
     let tile_cols = aligned_tile_cols(spec, cols);
     let slots = buffer.max(1).min(rows.max(1));
     let mut partials = vec![0.0f64; slots];

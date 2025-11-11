@@ -80,4 +80,3 @@ pub fn ensure_python_initialized() {
         pyo3::prepare_freethreaded_python();
     });
 }
-
