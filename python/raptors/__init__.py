@@ -35,11 +35,13 @@ __all__ = [
     "zeros",
     "ones",
     "broadcast_add",
+    "broadcast_add_inplace",
     "from_numpy",
     "to_numpy",
     "simd_enabled",
     "slice_array",
     "index_array",
+    "scale_inplace",
     "__version__",
     "__author__",
     "__github__",
@@ -120,6 +122,24 @@ def broadcast_add(lhs, rhs):
     if isinstance(lhs, RustArrayI32) and isinstance(rhs, RustArrayI32):
         return _core.broadcast_add_i32(lhs, rhs)
     raise TypeError("broadcast_add requires both operands to share the same Raptors dtype")
+
+
+def broadcast_add_inplace(lhs, rhs):
+    """Add `rhs` to `lhs` in-place using broadcasting semantics (float32 only)."""
+
+    if not isinstance(lhs, RustArrayF32) or not isinstance(rhs, RustArrayF32):
+        raise TypeError("broadcast_add_inplace currently supports float32 Raptors arrays only")
+    lhs.broadcast_add_inplace(rhs)
+    return lhs
+
+
+def scale_inplace(array: RustArrayF32, factor: float) -> RustArrayF32:
+    """Scale a float32 array in-place by `factor`, reusing the existing buffer."""
+
+    if not isinstance(array, RustArrayF32):
+        raise TypeError("scale_inplace currently supports float32 Raptors arrays only")
+    array.scale_inplace(float(factor))
+    return array
 
 
 def from_numpy(ndarray):

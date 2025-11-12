@@ -3,7 +3,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "${SCRIPT_DIR}"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${ROOT_DIR}"
 
 if [[ -z "${PYTHON_BIN:-}" ]]; then
   if command -v pyenv >/dev/null 2>&1; then
@@ -33,7 +34,7 @@ export DYLD_LIBRARY_PATH="${PYTHON_LIBDIR}:${DYLD_LIBRARY_PATH:-}"
 fi
 export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-undefined -C link-arg=dynamic_lookup"
 
-VENV_DIR="${VENV_DIR:-${SCRIPT_DIR}/.raptors-test-venv}"
+VENV_DIR="${VENV_DIR:-${ROOT_DIR}/.raptors-test-venv}"
 VENV_PYTHON="${VENV_DIR}/bin/python"
 
 if [[ ! -d "${VENV_DIR}" ]]; then
@@ -62,16 +63,18 @@ fi
 
 if [[ "${SKIP_MATURIN:-0}" != "1" ]]; then
   echo "==> Installing Python extension (maturin develop)"
-  env -u CONDA_PREFIX VIRTUAL_ENV="${VENV_DIR}" "${VENV_PYTHON}" -m maturin develop --release --manifest-path "${SCRIPT_DIR}/rust/Cargo.toml"
+  env -u CONDA_PREFIX VIRTUAL_ENV="${VENV_DIR}" "${VENV_PYTHON}" -m maturin develop --release --manifest-path "${ROOT_DIR}/rust/Cargo.toml"
 else
   echo "==> Skipping maturin develop (SKIP_MATURIN=1)"
 fi
+
+export PYTHONPATH="${ROOT_DIR}/python${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "==> Running cargo test (Rust unit + integration)"
 env -u CONDA_PREFIX \
   PYO3_PYTHON="${PYO3_PYTHON}" \
   VIRTUAL_ENV="${VENV_DIR}" \
-  cargo test --manifest-path "${SCRIPT_DIR}/rust/Cargo.toml" \
+  cargo test --manifest-path "${ROOT_DIR}/rust/Cargo.toml" \
              --no-default-features \
              --features test-suite
 

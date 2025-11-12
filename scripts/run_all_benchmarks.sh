@@ -38,6 +38,7 @@ RESULT_ROOT="${ROOT_DIR}/benchmarks/results"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT_DIR="${RESULT_ROOT}/${STAMP}"
 mkdir -p "${OUT_DIR}"
+AXIS0_LOG="${RESULT_ROOT}/axis0_history.jsonl"
 
 THREAD_POOL="${RAPTORS_THREADS:-8}"
 AXIS0_WARMUP="${AXIS0_WARMUP:-1}"
@@ -65,7 +66,8 @@ run_axis0() {
     --simd-mode force \
     --warmup "${AXIS0_WARMUP}" \
     --repeats "${AXIS0_REPEATS}" \
-    --output-json "${OUT_DIR}/axis0_${label}.json"
+    --output-json "${OUT_DIR}/axis0_${label}.json" \
+    --append-log "${AXIS0_LOG}"
 }
 
 run_suite() {

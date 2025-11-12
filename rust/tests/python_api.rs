@@ -132,6 +132,63 @@ fn broadcast_add_handles_row_vector_inputs() -> PyResult<()> {
 }
 
 #[test]
+fn scale_inplace_reuses_buffer_for_small_float32() -> PyResult<()> {
+    ensure_python_initialized();
+
+    Python::with_gil(|py| -> PyResult<()> {
+        let module = init(py)?;
+        let array_f32 = module.getattr("array_f32")?;
+
+        let values = PyList::new_bound(py, (0..4).map(|v| v as f32));
+        let arr = array_f32.call1((values,))?;
+        let iface = arr.getattr("__array_interface__")?;
+        let before_ptr: usize = iface.get_item("data")?.get_item(0)?.extract()?;
+
+        arr.call_method1("scale_inplace", (2.0_f32,))?;
+
+        let iface_after = arr.getattr("__array_interface__")?;
+        let after_ptr: usize = iface_after.get_item("data")?.get_item(0)?.extract()?;
+        assert_eq!(before_ptr, after_ptr);
+
+        let data: Vec<f32> = arr.call_method0("to_list")?.extract()?;
+        assert_eq!(data, vec![0.0, 2.0, 4.0, 6.0]);
+        Ok(())
+    })?;
+
+    Ok(())
+}
+
+#[test]
+fn broadcast_add_inplace_updates_matrix_without_allocating() -> PyResult<()> {
+    ensure_python_initialized();
+
+    Python::with_gil(|py| -> PyResult<()> {
+        let module = init(py)?;
+        let array_f32 = module.getattr("array_f32")?;
+
+        let data = PyList::new_bound(py, [[1.0f32, 2.0], [3.0, 4.0]]);
+        let row = PyList::new_bound(py, [0.5f32, 1.5]);
+        let mat = array_f32.call1((data,))?;
+        let vec = array_f32.call1((row,))?;
+
+        let iface = mat.getattr("__array_interface__")?;
+        let before_ptr: usize = iface.get_item("data")?.get_item(0)?.extract()?;
+
+        mat.call_method1("broadcast_add_inplace", (vec,))?;
+
+        let iface_after = mat.getattr("__array_interface__")?;
+        let after_ptr: usize = iface_after.get_item("data")?.get_item(0)?.extract()?;
+        assert_eq!(before_ptr, after_ptr);
+
+        let updated: Vec<f32> = mat.call_method0("to_list")?.extract()?;
+        assert_eq!(updated, vec![1.5, 3.5, 3.5, 5.5]);
+        Ok(())
+    })?;
+
+    Ok(())
+}
+
+#[test]
 fn threading_info_exposes_expected_keys() -> PyResult<()> {
     ensure_python_initialized();
 
