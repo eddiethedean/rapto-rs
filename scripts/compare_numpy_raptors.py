@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import statistics
@@ -46,6 +48,31 @@ PRESET_SUITES = {
 
 OperationFn = Callable[[], None]
 OperationPair = Tuple[OperationFn, OperationFn, str]
+
+
+def collect_numpy_config() -> Dict[str, object]:
+    """Return NumPy configuration/BLAS information for metadata/logging."""
+    from numpy import __config__ as np_config  # local import to avoid unused in tests
+
+    capture = io.StringIO()
+    with contextlib.redirect_stdout(capture):
+        np_config.show()
+    show_text = capture.getvalue().strip()
+
+    info = {}
+    try:
+        blas_info = np_config.get_info("blas_opt_info")
+    except Exception:  # pragma: no cover - defensive
+        blas_info = {}
+    try:
+        lapack_info = np_config.get_info("lapack_opt_info")
+    except Exception:  # pragma: no cover - defensive
+        lapack_info = {}
+
+    info["show"] = show_text
+    info["blas_opt_info"] = blas_info
+    info["lapack_opt_info"] = lapack_info
+    return info
 
 
 def parse_shape(value: str) -> Tuple[int, ...]:
@@ -158,8 +185,13 @@ def choose_operations(
 
 
 def summarize(name: str, times: List[float]) -> Tuple[float, float]:
-    mean = statistics.mean(times)
-    std = statistics.stdev(times) if len(times) > 1 else 0.0
+    if len(times) >= 5:
+        sorted_times = sorted(times)
+        trimmed = sorted_times[1:-1]
+    else:
+        trimmed = times
+    mean = statistics.mean(trimmed)
+    std = statistics.stdev(trimmed) if len(trimmed) > 1 else 0.0
     return mean, std
 
 
@@ -174,14 +206,22 @@ def run_case(
     operations: Iterable[str] | None,
     warmup: int,
     repeats: int,
+    layout: str,
 ) -> Dict[str, object]:
     np_dtype = NUMPY_DTYPES[dtype_name]
-    total = product(shape)
+    base_np = np.arange(product(shape), dtype=np_dtype).reshape(shape)
+    if layout == "transpose" and base_np.ndim >= 2:
+        base_np = base_np.T
+    elif layout == "fortran":
+        base_np = np.asfortranarray(base_np)
+    else:
+        base_np = np.ascontiguousarray(base_np)
+    shape = tuple(int(dim) for dim in base_np.shape)
+    total = int(base_np.size)
 
     print(f"Benchmarking shape={shape}, dtype={dtype_name}, elements={total:,}")
-    print(f"Warm-up iterations={warmup}, timed repeats={repeats}\n")
+    print(f"Warm-up iterations={warmup}, timed repeats={repeats}, layout={layout}\n")
 
-    base_np = np.arange(total, dtype=np_dtype).reshape(shape)
     base_raptors = raptors_mod.from_numpy(base_np)
 
     available_ops = build_operations(base_np, base_raptors, raptors_mod, dtype_name)
@@ -235,6 +275,7 @@ def run_case(
         "shape": list(shape),
         "dtype": dtype_name,
         "elements": total,
+        "layout": layout,
         "operations": json_results,
     }
 
@@ -283,6 +324,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Run a preset suite of shapes/dtypes (overrides --shape/--dtype).",
     )
     parser.add_argument(
+        "--layout",
+        choices=["contiguous", "transpose", "fortran"],
+        default="contiguous",
+        help="Arrange NumPy inputs to test contiguous, transposed, or Fortran-order layouts.",
+    )
+    parser.add_argument(
         "--output-json",
         help="Optional path to write detailed benchmark results in JSON format.",
     )
@@ -296,6 +343,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=0.0,
         help="Additional slack (ms) added to each baseline max when validating.",
     )
+    parser.add_argument(
+        "--log-numpy-config",
+        dest="log_numpy_config",
+        action="store_true",
+        help="Print NumPy build / BLAS configuration before running benchmarks.",
+    )
+    parser.add_argument(
+        "--skip-numpy-config",
+        dest="log_numpy_config",
+        action="store_false",
+        help="Suppress NumPy configuration logging.",
+    )
+    parser.set_defaults(log_numpy_config=True)
 
     args = parser.parse_args(argv)
 
@@ -307,6 +367,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         os.environ.pop("RAPTORS_SIMD", None)
 
     import raptors as raptors_mod  # type: ignore[import]
+
+    numpy_metadata: Dict[str, object] | None = None
+    if args.log_numpy_config:
+        numpy_metadata = collect_numpy_config()
+        print("== NumPy configuration ==")
+        show_text = str(numpy_metadata.get("show", "")).strip()
+        if show_text:
+            print(show_text)
+        else:
+            print("(numpy.__config__.show() produced no output)")
+        blas_info = numpy_metadata.get("blas_opt_info", {})
+        if blas_info:
+            print("\n[blas_opt_info]")
+            for key, value in sorted(blas_info.items()):
+                print(f"{key}: {value}")
+        lapack_info = numpy_metadata.get("lapack_opt_info", {})
+        if lapack_info:
+            print("\n[lapack_opt_info]")
+            for key, value in sorted(lapack_info.items()):
+                print(f"{key}: {value}")
+        print()
 
     cases: List[Dict[str, object]] = []
     if args.suite:
@@ -330,12 +411,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             operations=args.operations,
             warmup=args.warmup,
             repeats=args.repeats,
+            layout=args.layout,
         )
         json_output.append(result)
 
+    metadata = {
+        "numpy_version": np.__version__,
+        "numpy_config": numpy_metadata,
+        "simd_mode": args.simd_mode,
+        "layout": args.layout,
+        "env": {
+            "RAPTORS_THREADS": os.environ.get("RAPTORS_THREADS"),
+            "RAPTORS_SIMD": os.environ.get("RAPTORS_SIMD"),
+        },
+        "timestamp": time.time(),
+    }
+
     if args.output_json:
+        payload = {"metadata": metadata, "cases": json_output}
         with open(args.output_json, "w", encoding="utf-8") as handle:
-            json.dump(json_output, handle, indent=2)
+            json.dump(payload, handle, indent=2, default=str)
         print(f"\nWrote JSON results to {args.output_json}")
 
     if args.validate_json:

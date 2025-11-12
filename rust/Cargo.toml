@@ -16,6 +16,7 @@ default = ["python-extension", "matrixmultiply-backend"]
 python-extension = ["pyo3/extension-module"]
 test-suite = ["pyo3/auto-initialize"]
 matrixmultiply-backend = ["matrixmultiply"]
+openblas = []
 
 [dependencies]
 pyo3 = "0.21"

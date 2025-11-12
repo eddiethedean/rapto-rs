@@ -1,11 +1,34 @@
 #![allow(dead_code)]
 
 #[cfg(target_arch = "x86_64")]
+use std::sync::OnceLock;
+
+mod cpu;
+
+pub use cpu::capabilities;
+pub type SimdCapabilities = cpu::SimdCapabilities;
+
+#[cfg(target_arch = "x86_64")]
+type ScaleKernelF32 = unsafe fn(&[f32], f32, &mut [f32]);
+
+#[cfg(target_arch = "x86_64")]
+static SCALE_F32_KERNEL: OnceLock<Option<ScaleKernelF32>> = OnceLock::new();
+
+#[cfg(target_arch = "x86_64")]
+fn select_scale_f32_kernel() -> Option<ScaleKernelF32> {
+    if cpu::capabilities().avx2 {
+        Some(x86::scale_same_shape_f32)
+    } else {
+        None
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
 pub fn reduce_sum_f64(input: &[f64], accumulators: usize) -> Option<f64> {
-    if std::arch::is_x86_feature_detected!("avx512f") {
+    if cpu::capabilities().avx512 {
         return Some(unsafe { x86::avx512::reduce_sum_f64(input, accumulators) });
     }
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if cpu::capabilities().avx2 {
         return Some(unsafe { x86::reduce_sum_f64(input, accumulators) });
     }
     None
@@ -24,7 +47,7 @@ pub fn reduce_sum_f64(input: &[f64], accumulators: usize) -> Option<f64> {
 
 #[cfg(target_arch = "x86_64")]
 pub fn reduce_sum_f32(input: &[f32], accumulators: usize) -> Option<f64> {
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if cpu::capabilities().avx2 {
         return Some(unsafe { x86::reduce_sum_f32(input, accumulators) });
     }
     None
@@ -55,7 +78,7 @@ pub fn add_column_broadcast_f64(
     {
         return false;
     }
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if cpu::capabilities().avx2 {
         unsafe {
             x86::add_columnar_f64(input, col_values, rows, cols, out);
         }
@@ -110,7 +133,7 @@ pub fn add_column_broadcast_f32(
     {
         return false;
     }
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if cpu::capabilities().avx2 {
         unsafe {
             x86::add_columnar_f32(input, col_values, rows, cols, out);
         }
@@ -156,13 +179,13 @@ pub fn add_assign_inplace_f64(acc: &mut [f64], row: &[f64]) -> bool {
     if acc.len() != row.len() {
         return false;
     }
-    if std::arch::is_x86_feature_detected!("avx512f") {
+    if cpu::capabilities().avx512 {
         unsafe {
             x86::avx512::add_assign_inplace_f64(acc, row);
         }
         return true;
     }
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if cpu::capabilities().avx2 {
         unsafe {
             x86::add_assign_inplace_f64(acc, row);
         }
@@ -193,7 +216,7 @@ pub fn add_assign_inplace_f32(acc: &mut [f32], row: &[f32]) -> bool {
     if acc.len() != row.len() {
         return false;
     }
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if cpu::capabilities().avx2 {
         unsafe {
             x86::add_assign_inplace_f32(acc, row);
         }
@@ -232,7 +255,7 @@ pub fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Optio
     }
     #[cfg(target_arch = "x86_64")]
     {
-        if std::arch::is_x86_feature_detected!("avx2") {
+        if cpu::capabilities().avx2 {
             return Some(unsafe { x86::reduce_axis0_columns_f32(data, rows, cols) });
         }
         return None;
@@ -259,7 +282,7 @@ pub fn reduce_axis0_tiled_f32(data: &[f32], rows: usize, cols: usize) -> Option<
     {
         if rows >= x86::TILED_MIN_ROWS_F32
             && cols >= x86::TILED_MIN_COLS_F32
-            && std::arch::is_x86_feature_detected!("avx2")
+            && cpu::capabilities().avx2
         {
             return Some(unsafe { x86::reduce_axis0_tiled_f32(data, rows, cols) });
         }
@@ -279,13 +302,13 @@ pub fn add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) -> bool {
     if lhs.len() != rhs.len() || lhs.len() != out.len() {
         return false;
     }
-    if std::arch::is_x86_feature_detected!("avx512f") {
+    if cpu::capabilities().avx512 {
         unsafe {
             x86::avx512::add_same_shape_f64(lhs, rhs, out);
         }
         return true;
     }
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if cpu::capabilities().avx2 {
         unsafe {
             x86::add_same_shape_f64(lhs, rhs, out);
         }
@@ -316,7 +339,7 @@ pub fn add_same_shape_f32(lhs: &[f32], rhs: &[f32], out: &mut [f32]) -> bool {
     if lhs.len() != rhs.len() || lhs.len() != out.len() {
         return false;
     }
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if cpu::capabilities().avx2 {
         unsafe {
             x86::add_same_shape_f32(lhs, rhs, out);
         }
@@ -347,13 +370,13 @@ pub fn add_row_scalar_f64(input: &[f64], scalar: f64, out: &mut [f64]) -> bool {
     if input.len() != out.len() {
         return false;
     }
-    if std::arch::is_x86_feature_detected!("avx512f") {
+    if cpu::capabilities().avx512 {
         unsafe {
             x86::avx512::add_row_scalar_f64(input, scalar, out);
         }
         return true;
     }
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if cpu::capabilities().avx2 {
         unsafe {
             x86::add_row_scalar_f64(input, scalar, out);
         }
@@ -384,7 +407,7 @@ pub fn add_row_scalar_f32(input: &[f32], scalar: f32, out: &mut [f32]) -> bool {
     if input.len() != out.len() {
         return false;
     }
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if cpu::capabilities().avx2 {
         unsafe {
             x86::add_row_scalar_f32(input, scalar, out);
         }
@@ -415,13 +438,13 @@ pub fn scale_same_shape_f64(input: &[f64], factor: f64, out: &mut [f64]) -> bool
     if input.len() != out.len() {
         return false;
     }
-    if std::arch::is_x86_feature_detected!("avx512f") {
+    if cpu::capabilities().avx512 {
         unsafe {
             x86::avx512::scale_same_shape_f64(input, factor, out);
         }
         return true;
     }
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if cpu::capabilities().avx2 {
         unsafe {
             x86::scale_same_shape_f64(input, factor, out);
         }
@@ -452,13 +475,15 @@ pub fn scale_same_shape_f32(input: &[f32], factor: f32, out: &mut [f32]) -> bool
     if input.len() != out.len() {
         return false;
     }
-    if std::arch::is_x86_feature_detected!("avx2") {
-        unsafe {
-            x86::scale_same_shape_f32(input, factor, out);
+    match *SCALE_F32_KERNEL.get_or_init(select_scale_f32_kernel) {
+        Some(kernel) => {
+            unsafe {
+                kernel(input, factor, out);
+            }
+            true
         }
-        return true;
+        None => false,
     }
-    false
 }
 
 #[cfg(target_arch = "aarch64")]

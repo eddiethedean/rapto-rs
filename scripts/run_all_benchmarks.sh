@@ -1,4 +1,162 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
+OUTPUT_DIR="benchmarks/results/latest"
+VALIDATE_SLACK="0.05"
+SIMD_REPEATS="11"
+SIMD_WARMUP="2"
+AXIS0_OUTPUT="$OUTPUT_DIR/axis0_suite.json"
+
+usage() {
+  cat <<'EOF'
+Usage: run_all_benchmarks.sh [--output-dir DIR]
+
+Runs the nightly benchmark suite, validating results against the checked-in
+baselines and emitting summaries (CSV + optional plots) into OUTPUT_DIR.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output-dir)
+      OUTPUT_DIR="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+mkdir -p "$OUTPUT_DIR"
+
+# Sanitize potentially noisy environment variables for reproducibility.
+unset PYTHONPATH
+export OMP_NUM_THREADS=1
+export SKIP_MATURIN=1
+export RAPTORS_BLAS="${RAPTORS_BLAS:-auto}"
+export RAPTORS_BLAS_SCALE="${RAPTORS_BLAS_SCALE:-0}"
+
+run_benchmark() {
+  local label="$1"
+  shift
+  echo ">>> Running $label"
+  python scripts/compare_numpy_raptors.py "$@"
+}
+
+RA32="$OUTPUT_DIR/float32_simd.json"
+RA64="$OUTPUT_DIR/float64_simd.json"
+RA32_SCALAR="$OUTPUT_DIR/float32_scalar.json"
+RA64_SCALAR="$OUTPUT_DIR/float64_scalar.json"
+
+# SIMD benchmarks (threads pinned to reduce variance)
+ORIGINAL_THREADS="${RAPTORS_THREADS:-}"
+export RAPTORS_THREADS="${ORIGINAL_THREADS:-10}"
+
+run_benchmark "float64 SIMD baseline" \
+  --suite 2d \
+  --simd-mode force \
+  --warmup "$SIMD_WARMUP" \
+  --repeats "$SIMD_REPEATS" \
+  --layout contiguous \
+  --output-json "$RA64" \
+  --validate-json benchmarks/baselines/2d_float64.json \
+  --validate-slack "$VALIDATE_SLACK"
+
+run_benchmark "float32 SIMD baseline" \
+  --suite 2d \
+  --simd-mode force \
+  --warmup "$SIMD_WARMUP" \
+  --repeats "$SIMD_REPEATS" \
+  --layout contiguous \
+  --output-json "$RA32" \
+  --validate-json benchmarks/baselines/2d_float32.json \
+  --validate-slack "$VALIDATE_SLACK"
+
+# Scalar passes (allow pool to size naturally)
+if [[ -n "${ORIGINAL_THREADS}" ]]; then
+  export RAPTORS_THREADS="$ORIGINAL_THREADS"
+else
+  export RAPTORS_THREADS=10
+fi
+
+run_benchmark "float64 scalar baseline" \
+  --suite 2d \
+  --simd-mode disable \
+  --warmup "$SIMD_WARMUP" \
+  --repeats "$SIMD_REPEATS" \
+  --layout contiguous \
+  --output-json "$RA64_SCALAR" \
+  --validate-json benchmarks/baselines/2d_float64_scalar.json \
+  --validate-slack "$VALIDATE_SLACK"
+
+run_benchmark "float32 scalar baseline" \
+  --suite 2d \
+  --simd-mode disable \
+  --warmup "$SIMD_WARMUP" \
+  --repeats "$SIMD_REPEATS" \
+  --layout contiguous \
+  --output-json "$RA32_SCALAR" \
+  --validate-json benchmarks/baselines/2d_float32_scalar.json \
+  --validate-slack "$VALIDATE_SLACK"
+
+# Axis-0 suite (captures stride-aware tiling and BLAS results).
+echo ">>> Running axis-0 suite (SIMD forced)"
+  export RAPTORS_THREADS="${ORIGINAL_THREADS:-10}"
+python benchmarks/run_axis0_suite.py \
+  --simd-mode force \
+  --warmup 1 \
+  --repeats 7 \
+  --output-json "$AXIS0_OUTPUT"
+
+# Summaries (CSV + plots if matplotlib is present).
+echo ">>> Generating nightly summary"
+python scripts/summarize_benchmarks.py \
+  "$RA64" "$RA32" "$RA64_SCALAR" "$RA32_SCALAR" \
+  --output-csv "$OUTPUT_DIR/nightly_summary.csv" \
+  --plot "$OUTPUT_DIR/nightly_slowdowns.svg" \
+  --sub-one
+
+cat > "$OUTPUT_DIR/index.html" <<EOF
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Raptors Nightly Benchmarks</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; background-color: #f8f9fa; }
+      h1 { margin-bottom: 0.5rem; }
+      ul { line-height: 1.6; }
+      .chart { margin-top: 2rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Nightly Benchmark Summary</h1>
+    <p>Generated on $(date -u +"%Y-%m-%d %H:%M UTC").</p>
+    <ul>
+      <li><a href="float64_simd.json">float64 SIMD results</a></li>
+      <li><a href="float32_simd.json">float32 SIMD results</a></li>
+      <li><a href="float64_scalar.json">float64 scalar results</a></li>
+      <li><a href="float32_scalar.json">float32 scalar results</a></li>
+      <li><a href="axis0_suite.json">axis-0 suite</a></li>
+      <li><a href="nightly_summary.csv">slowdown CSV summary</a></li>
+    </ul>
+    <div class="chart">
+      <h2>Slowest Entries (&lt;1.0×)</h2>
+      <img src="nightly_slowdowns.svg" alt="Slowdown chart" />
+    </div>
+  </body>
+</html>
+EOF
+
+echo "Nightly benchmarks complete. Results stored under $OUTPUT_DIR"
+#!/usr/bin/env bash
 
 set -euo pipefail
 

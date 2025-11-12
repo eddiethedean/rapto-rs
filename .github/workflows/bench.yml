@@ -28,60 +28,17 @@ jobs:
       - name: Build Raptors extension
         run: maturin develop --release
 
-      - name: Prepare results directory
-        run: mkdir -p benchmarks/results
-
-      - name: Validate float64 SIMD baselines
+      - name: Run nightly benchmark suite
         env:
-          RAPTORS_THREADS: "8"
-        run: |
-          python scripts/compare_numpy_raptors.py \
-            --suite 2d \
-            --simd-mode force \
-            --warmup 1 \
-            --repeats 7 \
-            --output-json benchmarks/results/float64_simd.json \
-            --validate-json benchmarks/baselines/2d_float64.json \
-            --validate-slack 0.05
-
-      - name: Validate float32 SIMD baselines
-        env:
-          RAPTORS_THREADS: "8"
-        run: |
-          python scripts/compare_numpy_raptors.py \
-            --suite 2d \
-            --simd-mode force \
-            --warmup 1 \
-            --repeats 7 \
-            --output-json benchmarks/results/float32_simd.json \
-            --validate-json benchmarks/baselines/2d_float32.json \
-            --validate-slack 0.05
-
-      - name: Validate float64 scalar baselines
-        run: |
-          python scripts/compare_numpy_raptors.py \
-            --suite 2d \
-            --simd-mode disable \
-            --warmup 1 \
-            --repeats 7 \
-            --output-json benchmarks/results/float64_scalar.json \
-            --validate-json benchmarks/baselines/2d_float64_scalar.json \
-            --validate-slack 0.05
-
-      - name: Validate float32 scalar baselines
-        run: |
-          python scripts/compare_numpy_raptors.py \
-            --suite 2d \
-            --simd-mode disable \
-            --warmup 1 \
-            --repeats 7 \
-            --output-json benchmarks/results/float32_scalar.json \
-            --validate-json benchmarks/baselines/2d_float32_scalar.json \
-            --validate-slack 0.05
+          RAPTORS_BLAS: auto
+        run: bash scripts/run_all_benchmarks.sh --output-dir benchmarks/results/latest
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
-          path: benchmarks/results/*.json
+          path: |
+            benchmarks/results/latest/*.json
+            benchmarks/results/latest/*.csv
+            benchmarks/results/latest/*.svg
 

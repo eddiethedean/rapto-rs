@@ -18,7 +18,7 @@ from typing import Dict, List
 
 
 # Guardrail reference (float32 axis-0):
-# - Expect >=1.05× at 1024² and >=0.65× at 2048² with the default threaded pool (RAPTORS_THREADS≥8).
+# - Expect >=1.05× at 1024² and >=0.80× at 2048² with the default threaded pool (RAPTORS_THREADS≥8).
 # - Single-thread diagnostics (RAPTORS_THREADS=1) may dip to ~0.94× at 1024² even after SIMD tiling changes.
 DEFAULT_SHAPES: List[int] = [512, 1024, 2048]
 DEFAULT_DTYPES: List[str] = ["float32", "float64"]
@@ -66,7 +66,21 @@ def run_case(
 
     if not data:
         raise RuntimeError(f"No benchmark output captured for dtype={dtype}, shape={shape}")
-    return data[0]
+
+    if isinstance(data, dict):
+        cases = data.get("cases")
+        if isinstance(cases, list) and cases:
+            return cases[0]
+        raise RuntimeError(
+            f"Unexpected benchmark payload structure (expected 'cases' list): {data.keys()}"
+        )
+
+    if isinstance(data, list) and data:
+        return data[0]
+
+    raise RuntimeError(
+        f"Unsupported benchmark payload type {type(data)!r} for dtype={dtype}, shape={shape}"
+    )
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -168,7 +182,7 @@ def main(argv: List[str] | None = None) -> int:
                 elif cols <= 1024:
                     threshold = 1.05
                 else:
-                    threshold = 0.65
+                    threshold = 0.80
             attempts = 0
             while (
                 threshold is not None
@@ -233,7 +247,7 @@ def main(argv: List[str] | None = None) -> int:
                     ), f"float32 axis-0 speedup regression: {shape_label} reported {speedup:.2f}x"
                 else:
                     assert (
-                        speedup >= 0.65
+                        speedup >= 0.80
                     ), f"float32 axis-0 large-shape regression: {shape_label} reported {speedup:.2f}x"
 
     if args.append_log:

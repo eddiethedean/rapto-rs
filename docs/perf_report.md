@@ -1,18 +1,29 @@
 # Performance & Benchmarking Report
 
-## Latest Measurements (RAPTORS_THREADS=8, see notes per run)
+## Latest Measurements (RAPTORS_THREADS=10 unless noted)
 
-- `float32` @ `512²` `mean_axis0`: **0.02 ms** (NumPy 0.03 ms, 1.48×) — SIMD lane reductions stay favored for smaller matrices.  
-  (`benchmarks/run_axis0_suite.py --warmup 1 --repeats 4`)
-- `float32` @ `2048²` `mean_axis0`: **0.33 ms** (NumPy 0.27 ms, 0.82×) — enabling the `matrixmultiply` backend lifts the large-column reducer above the CI guard rail (toggle with `RAPTORS_MATRIXMULTIPLY=1`).  
-  (`benchmarks/run_axis0_suite.py --warmup 1 --repeats 4`)
-- `float32` @ `2048²` `scale`: **0.30 ms** (NumPy 0.32 ms, 1.08×) — tuned Rayon chunk sizing (`SCALE_PAR_MIN/MAX_CHUNK_ELEMS`) keeps all workers active without falling back to scalar copies.  
-  (`compare_numpy_raptors.py --shape 2048x2048 --dtype float32 --operations scale --simd-mode force --warmup 1 --repeats 10`)
-- `float64` @ `1024²` `scale`: **0.40 ms** (NumPy 0.48 ms, 1.20×) — widened SIMD loop with Rayon chunking beats NumPy at medium sizes.  
-  (`compare_numpy_raptors.py --suite 2d --simd-mode force --warmup 1 --repeats 7`)
-- Column broadcast add remains close: `float32` @ `2048²` ≈0.62× by default; a matrixmultiply-powered prototype exists but is currently disabled pending accuracy tuning.
+- `float32` @ `2048²` `mean_axis0`: **0.19 ms** (NumPy 0.30 ms, 1.60×) — BLAS-backed axis-0 GEMV now kicks in automatically for large shapes.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 2048x2048 --dtype float32 --operations mean_axis0 --simd-mode force --warmup 2 --repeats 21 --output-json benchmarks/results/dev_plan/axis0_f32_2048.json`)
+- `float64` @ `1024²` `mean_axis0`: **0.024 ms** (NumPy 0.14 ms, 7.0×) — new BLAS-backed `dgemv` path handles medium-sized axis reducers.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float64 --operations mean_axis0 --simd-mode force --warmup 1 --repeats 7`)
+- `float64` @ `2048²` `mean_axis0`: **0.38 ms** (NumPy 0.55 ms, 1.41×) — larger reducers stick with the SIMD+tiled path, which now outpaces BLAS.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 2048x2048 --dtype float64 --operations mean_axis0 --simd-mode force --warmup 1 --repeats 7`)
+- `float64` `broadcast_add` (row vector) @ `1024²`, `--simd-mode disable`: **0.64 ms** (NumPy 1.20 ms, 1.87×) — row broadcasts delegate to BLAS `daxpy`, improving the scalar fallback as well as the SIMD build.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float64 --operations broadcast_add --simd-mode disable --warmup 2 --repeats 21`)
+- `float64` `broadcast_add` @ `512²`: **0.15 ms** (NumPy 0.19 ms, 1.23×) — small shapes now bypass BLAS so the SIMD path wins consistently.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float64 --operations broadcast_add --simd-mode force --warmup 1 --repeats 21`)
+- `float32` `broadcast_add` (row vector) @ `1024²`, `--simd-mode disable`: **0.26 ms** (NumPy 0.26 ms, 1.02×) — parity within noise; SIMD mode remains the recommended path for float32.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float32 --operations broadcast_add --simd-mode disable --warmup 2 --repeats 21`)
+- `float32` `scale` @ `1024²`: **0.43 ms** (NumPy 0.47 ms, 1.10×) — lowering the parallel cutover keeps the SIMD+xRayon path ahead without forcing BLAS.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float32 --operations scale --simd-mode force --warmup 2 --repeats 21 --output-json benchmarks/results/scale1024/scale_f32_1024_simd_tuned.json`)
+- `float32` `scale` @ `2048²`: **0.37 ms** (NumPy 0.56 ms, 1.52×) — revised chunk scheduling keeps the SIMD kernel bandwidth-bound instead of bouncing between threads.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 2048x2048 --dtype float32 --operations scale --simd-mode force --warmup 2 --repeats 21 --output-json benchmarks/results/scale1024/scale_f32_2048_simd_tuned.json`)
+- `float32` @ `512²` `mean_axis0`: **0.021 ms** (NumPy 0.029 ms, 4.8×) — unchanged small-matrix performance with SIMD lanes.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float32 --operations mean_axis0 --simd-mode force --warmup 2 --repeats 21`)
 
-The SIMD suite continues to use `--simd-mode force`; pinning threads via `RAPTORS_THREADS=8` is now recommended to limit scheduling variance during regression checks.
+Axis-0 reducers now prefer the available BLAS backend once row/column thresholds are met, while row broadcast adds reuse BLAS `axpy` routines (with scalar fallbacks if BLAS is disabled).  Scaling keeps the SIMD/parallel heuristics by default; opt in with `RAPTORS_BLAS_SCALE=1` when the downstream BLAS beats the native path for a given matrix shape.
+
+The SIMD suite continues to use `--simd-mode force`; pinning threads via `RAPTORS_THREADS=10` matches the latest guardrail runs and reduces variance.
 
 ## Overview
 
@@ -59,6 +70,8 @@ python scripts/compare_numpy_raptors.py --suite 2d --simd-mode disable \
 python scripts/validate_benchmark_results.py --slack 0.05 --absolute-slack-ms 0.05
 ```
 
+Use `--layout transpose` or `--layout fortran` with `scripts/compare_numpy_raptors.py` to exercise non-C-contiguous NumPy inputs when chasing stride-sensitive regressions.
+
 ### Targeted Harnesses
 
 - **Axis-0 float32 reducers**:  
@@ -67,9 +80,21 @@ python scripts/validate_benchmark_results.py --slack 0.05 --absolute-slack-ms 0.
 - **Broadcast add spot checks**: reuse `scripts/compare_numpy_raptors.py` with `--operations broadcast_add` and pass `--output-json` so telemetry is persisted for CI.
 - All persisted JSON artefacts are linted in CI via `python scripts/validate_benchmark_results.py`, which now also enforces the baseline regression guardrails.
 
+## Diagnostics Toolkit
+
+- `python scripts/compare_numpy_raptors.py --log-numpy-config` now captures NumPy BLAS/LAPACK build info and stores it under the `metadata.numpy_config` block in each JSON artefact.
+- `raptors.threading_info()["stride_counters"]` exposes contiguous vs strided dispatch counts per kernel, `["simd_capabilities"]` reports the detected AVX/NEON level, `["axis_tile_histogram"]` tracks column tiling widths, and `["blas_backend"]` reflects the active BLAS provider.
+- `python scripts/summarize_benchmarks.py results.json --sub-one --plot benchmarks/results/latest/slowdowns.svg` emits both CSV summaries and a bar chart of the slowest entries (optional matplotlib dependency).
+- `python scripts/profile_hotspots.py --operation axis0 --tool py-spy --threads 8` records a flamegraph for the axis-0 reducer; swap `--tool perf` and provide `--flamegraph-output` to collect Linux perf data and SVGs for audits.
+- `bash scripts/run_all_benchmarks.sh --output-dir benchmarks/results/latest` mirrors the nightly CI run and emits JSON, CSV, SVG, and an `index.html` dashboard summarizing the latest speedups.
+- `benchmarks/results/dev_scale/`, `benchmarks/results/dev_plan/`, and `benchmarks/results/scale1024/` contain the latest targeted JSON dumps collected while tuning scale, axis-0, and broadcast heuristics.
+
 ## Adaptive Threading Controls
 
 - `RAPTORS_SIMD=0|1` — force scalar/SIMD execution.
+- `RAPTORS_SIMD_MAX=<level>` — cap SIMD dispatch to `scalar`, `sse4.1`, `avx`, `avx2`, `avx512`, or `neon` (default: auto-detect).
+- `RAPTORS_BLAS=auto|accelerate|openblas|none` — pick the BLAS backend; `auto` prefers Accelerate on macOS and OpenBLAS when the optional feature is enabled.
+- `RAPTORS_BLAS_SCALE=0|1` — opt-in to BLAS-backed scaling; now defaults to `0` because SIMD/parallel paths outperform Accelerate for 512²–2048².
 - `RAPTORS_THREADS=<n>` — pin Rayon pool size.
 - `RAPTORS_MATRIXMULTIPLY=0|1` — enable/disable the matrixmultiply-backed axis-0 reducers (default: on).
 - `RAPTORS_MATRIXMULTIPLY_SCALE=0|1` — opt-in to experimental GEMM-based scaling (default: off).

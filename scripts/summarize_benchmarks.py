@@ -15,7 +15,7 @@ import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Sequence
+from typing import Iterable, List, Optional, Sequence
 
 
 @dataclass
@@ -28,6 +28,7 @@ class BenchmarkRow:
     raptors_ms: float
     raptors_std_ms: float
     speedup: float
+    layout: Optional[str] = None
 
     @property
     def shape_str(self) -> str:
@@ -50,6 +51,7 @@ def load_json(path: Path) -> Iterable[BenchmarkRow]:
                 source=path,
                 shape=shape,
                 dtype=dtype,
+                layout=case.get("layout"),
                 operation=op.get("name", ""),
                 numpy_ms=float(op.get("numpy_mean_s", 0.0)) * 1000.0,
                 raptors_ms=float(op.get("raptors_mean_s", 0.0)) * 1000.0,
@@ -80,6 +82,7 @@ def write_csv(rows: Sequence[BenchmarkRow], output: Path) -> None:
                 "source",
                 "shape",
                 "dtype",
+                "layout",
                 "operation",
                 "numpy_ms",
                 "raptors_ms",
@@ -93,6 +96,7 @@ def write_csv(rows: Sequence[BenchmarkRow], output: Path) -> None:
                     row.source.name,
                     row.shape_str,
                     row.dtype,
+                    row.layout or "",
                     row.operation,
                     f"{row.numpy_ms:.3f}",
                     f"{row.raptors_ms:.3f}",
@@ -102,11 +106,51 @@ def write_csv(rows: Sequence[BenchmarkRow], output: Path) -> None:
             )
 
 
+def write_plot(rows: Sequence[BenchmarkRow], output: Path, top: int = 20) -> None:
+    try:
+        import matplotlib.pyplot as plt  # type: ignore[import]
+    except ImportError:  # pragma: no cover - optional dependency
+        print(
+            "matplotlib not available; skipping plot generation "
+            f"for {output}. Install matplotlib to enable plotting."
+        )
+        return
+
+    if top <= 0:
+        top = 20
+
+    worst = sorted(rows, key=lambda row: row.speedup)[:top]
+    if not worst:
+        print("No rows available to plot.")
+        return
+
+    labels = [
+        f"{row.shape_str} {row.dtype} {row.layout or 'contig'} {row.operation}"
+        for row in worst
+    ]
+    speeds = [row.speedup for row in worst]
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    plt.figure(figsize=(10, max(4, len(worst) * 0.35)))
+    colors = ["#d62728" if speed < 1.0 else "#2ca02c" for speed in speeds]
+    y_positions = list(range(len(worst)))
+    plt.barh(y_positions, speeds, color=colors)
+    plt.axvline(1.0, color="#444444", linestyle="--", linewidth=1.0, label="1.0× (parity)")
+    plt.yticks(y_positions, labels)
+    plt.xlabel("Speedup (NumPy time / Raptors time)")
+    plt.title("Raptors vs NumPy speedups (sorted by slowest)")
+    plt.tight_layout()
+    plt.legend(loc="lower right")
+    plt.savefig(output, dpi=200)
+    plt.close()
+    print(f"Wrote plot to {output}")
+
+
 def print_table(rows: Sequence[BenchmarkRow], top: int | None = None) -> None:
     from textwrap import shorten
 
     header = (
-        f"{'source':<20} {'shape':<12} {'dtype':<8} {'operation':<16} "
+        f"{'source':<20} {'shape':<12} {'dtype':<8} {'layout':<10} {'operation':<16} "
         f"{'numpy_ms':>10} {'raptors_ms':>12} {'± ms':>8} {'speedup':>8}"
     )
     print(header)
@@ -117,6 +161,7 @@ def print_table(rows: Sequence[BenchmarkRow], top: int | None = None) -> None:
             f"{shorten(row.source.name, width=20):<20} "
             f"{row.shape_str:<12} "
             f"{row.dtype:<8} "
+            f"{(row.layout or '-'):<10}"
             f"{row.operation:<16} "
             f"{row.numpy_ms:>10.3f} "
             f"{row.raptors_ms:>12.3f} "
@@ -156,6 +201,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Only report entries where Raptors is slower than NumPy (<1×).",
     )
+    parser.add_argument(
+        "--plot",
+        type=Path,
+        help="Optional path to write a horizontal bar chart (requires matplotlib).",
+    )
+    parser.add_argument(
+        "--plot-top",
+        type=int,
+        default=20,
+        help="Number of slowest entries to include in the plot (default: 20).",
+    )
     return parser.parse_args()
 
 
@@ -178,6 +234,9 @@ def main() -> int:
 
     if args.output_csv:
         write_csv(rows, args.output_csv)
+
+    if args.plot:
+        write_plot(rows, args.plot, top=args.plot_top)
 
     print_table(rows, top=args.top)
     return 0
