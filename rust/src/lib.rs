@@ -103,6 +103,20 @@ fn simd_is_enabled() -> bool {
     })
 }
 
+fn axis0_row_parallel_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        if let Ok(flag) = env::var("RAPTORS_AXIS0_ROW_CHUNK") {
+            match flag.trim().to_ascii_lowercase().as_str() {
+                "1" | "true" | "on" => return true,
+                "0" | "false" | "off" => return false,
+                _ => {}
+            }
+        }
+        false
+    })
+}
+
 const PARALLEL_MIN_ELEMENTS: usize = 1 << 15;
 const ADAPTIVE_SAMPLE_WINDOW: usize = 9;
 const TRACKED_DTYPES: &[&str] = &["float64", "float32", "int32"];
@@ -113,13 +127,15 @@ const AXIS0_PAR_MIN_ROWS: usize = 64;
 const AXIS0_PAR_MIN_COL_CHUNK: usize = 64;
 const AXIS0_PAR_MAX_COL_CHUNK: usize = 512;
 #[allow(dead_code)]
-const AXIS0_LARGE_TILED_ROWS: usize = 1536;
+const AXIS0_LARGE_TILED_ROWS: usize = 1024;
 #[allow(dead_code)]
 const AXIS0_LARGE_TILED_COLS: usize = 1024;
 const MATRIX_AXIS0_ROW_THRESHOLD: usize = 4096;
 const MATRIX_AXIS0_COL_THRESHOLD: usize = 1024;
 const MATRIX_AXIS0_COL_BLOCK: usize = 256;
 const SCALE_PAR_MIN_ROWS: usize = 32;
+const SCALE_PAR_MIN_CHUNK_ELEMS: usize = 1 << 14;
+const SCALE_PAR_MAX_CHUNK_ELEMS: usize = 1 << 18;
 const BROADCAST_PAR_MIN_ROWS: usize = 48;
 const BROADCAST_PAR_MIN_COLS: usize = 64;
 const AXIS0_COLUMN_SIMD_MIN_ROWS: usize = 64;
@@ -940,9 +956,16 @@ fn parallel_scale_f64(
     }
     if let Some(pool) = thread_pool() {
         let threads = pool.current_num_threads().max(1);
-        let min_rows = ((rows + threads - 1) / threads).max(SCALE_PAR_MIN_ROWS);
+        let base_rows = ((rows + threads - 1) / threads).max(SCALE_PAR_MIN_ROWS);
+        let max_rows = (SCALE_PAR_MAX_CHUNK_ELEMS / cols)
+            .max(SCALE_PAR_MIN_ROWS)
+            .min(rows.max(1));
+        let min_rows = (SCALE_PAR_MIN_CHUNK_ELEMS / cols)
+            .max(SCALE_PAR_MIN_ROWS)
+            .min(rows.max(1));
+        let chunk_rows = base_rows.clamp(min_rows, max_rows);
+        let chunk_elems = cols.saturating_mul(chunk_rows.max(1)).min(input.len());
         let start = Instant::now();
-        let chunk_elems = cols.saturating_mul(min_rows.max(1));
         pool.install(|| {
             use rayon::prelude::*;
             input
@@ -976,9 +999,16 @@ fn parallel_scale_f32(
     let factor_f32 = factor as f32;
     if let Some(pool) = thread_pool() {
         let threads = pool.current_num_threads().max(1);
-        let min_rows = ((rows + threads - 1) / threads).max(SCALE_PAR_MIN_ROWS);
+        let base_rows = ((rows + threads - 1) / threads).max(SCALE_PAR_MIN_ROWS);
+        let max_rows = (SCALE_PAR_MAX_CHUNK_ELEMS / cols)
+            .max(SCALE_PAR_MIN_ROWS)
+            .min(rows.max(1));
+        let min_rows = (SCALE_PAR_MIN_CHUNK_ELEMS / cols)
+            .max(SCALE_PAR_MIN_ROWS)
+            .min(rows.max(1));
+        let chunk_rows = base_rows.clamp(min_rows, max_rows);
+        let chunk_elems = cols.saturating_mul(chunk_rows.max(1)).min(input.len());
         let start = Instant::now();
-        let chunk_elems = cols.saturating_mul(min_rows.max(1));
         pool.install(|| {
             use rayon::prelude::*;
             input
@@ -2563,12 +2593,6 @@ fn reduce_axis0_f32(
         return finalize_axis0_f32(sums, Some(comps), rows, cols, op, false);
     }
 
-    if rows >= AXIS0_LARGE_TILED_ROWS && cols >= AXIS0_LARGE_TILED_COLS {
-        if let Some(simd_totals) = simd::reduce_axis0_tiled_f32(data, rows, cols) {
-            return finalize_axis0_f32(simd_totals, None, rows, cols, op, false);
-        }
-    }
-
     if matrix_backend_enabled()
         && rows >= MATRIX_AXIS0_ROW_THRESHOLD
         && cols >= MATRIX_AXIS0_COL_THRESHOLD
@@ -2583,9 +2607,21 @@ fn reduce_axis0_f32(
     if allow_parallel && cols >= AXIS0_PAR_MIN_COL_CHUNK && rows >= AXIS0_PAR_MIN_ROWS {
         if rows.saturating_mul(cols) >= PARALLEL_MIN_ELEMENTS {
             if let Some(pool) = thread_pool() {
-                let sums = reduce_axis0_parallel_tiled_f32(pool, data, rows, cols);
+                let use_row = axis0_row_parallel_enabled()
+                    && rows >= AXIS0_PAR_MIN_ROWS
+                    && cols >= AXIS0_PAR_MIN_COL_CHUNK;
+                let sums = if use_row {
+                    reduce_axis0_parallel_row_f32(pool, data, rows, cols)
+                } else {
+                    reduce_axis0_parallel_tiled_f32(pool, data, rows, cols)
+                };
                 return finalize_axis0_f32(sums, None, rows, cols, op, true);
             }
+        }
+    }
+    if rows >= AXIS0_LARGE_TILED_ROWS && cols >= AXIS0_LARGE_TILED_COLS {
+        if let Some(simd_totals) = simd::reduce_axis0_tiled_f32(data, rows, cols) {
+            return finalize_axis0_f32(simd_totals, None, rows, cols, op, false);
         }
     }
 
@@ -3687,11 +3723,7 @@ fn reduce_axis0_parallel_tiled_f32(
         if value % 8 != 0 {
             value = cmp::min(cols, ((value + 7) / 8) * 8);
         }
-        if value == 0 {
-            cols
-        } else {
-            value
-        }
+        if value == 0 { cols } else { value }
     };
 
     let mut output = vec![0.0f32; cols];
@@ -3707,6 +3739,42 @@ fn reduce_axis0_parallel_tiled_f32(
     });
 
     output
+}
+
+fn reduce_axis0_parallel_row_f32(
+    pool: &rayon::ThreadPool,
+    data: &[f32],
+    rows: usize,
+    cols: usize,
+) -> Vec<f32> {
+    let threads = pool.current_num_threads().max(1);
+    let chunk_rows = ((rows + threads - 1) / threads).max(AXIS0_PAR_MIN_ROWS);
+    pool.install(|| {
+        use rayon::prelude::*;
+        data.par_chunks(chunk_rows * cols)
+            .map(|chunk| {
+                let mut partial = vec![0.0f32; cols];
+                for row in chunk.chunks_exact(cols) {
+                    if !simd::add_assign_inplace_f32(&mut partial, row) {
+                        for (dst, &value) in partial.iter_mut().zip(row.iter()) {
+                            *dst += value;
+                        }
+                    }
+                }
+                partial
+            })
+            .reduce(
+                || vec![0.0f32; cols],
+                |mut acc, partial| {
+                    if !simd::add_assign_inplace_f32(&mut acc, partial.as_slice()) {
+                        for (dst, &value) in acc.iter_mut().zip(partial.iter()) {
+                            *dst += value;
+                        }
+                    }
+                    acc
+                },
+            )
+    })
 }
 
 fn accumulate_axis0_chunk_f32(

@@ -6,8 +6,8 @@
   (`benchmarks/run_axis0_suite.py --warmup 1 --repeats 4`)
 - `float32` @ `2048²` `mean_axis0`: **0.33 ms** (NumPy 0.27 ms, 0.82×) — enabling the `matrixmultiply` backend lifts the large-column reducer above the CI guard rail (toggle with `RAPTORS_MATRIXMULTIPLY=1`).  
   (`benchmarks/run_axis0_suite.py --warmup 1 --repeats 4`)
-- `float32` @ `512²` `scale`: **0.02 ms** (NumPy 0.02 ms, 1.01×) — baseline SIMD path. Experimental GEMM-backed scaling is gated behind `RAPTORS_MATRIXMULTIPLY_SCALE=1`.  
-  (`compare_numpy_raptors.py --suite 2d --simd-mode force --warmup 1 --repeats 7`)
+- `float32` @ `2048²` `scale`: **0.30 ms** (NumPy 0.32 ms, 1.08×) — tuned Rayon chunk sizing (`SCALE_PAR_MIN/MAX_CHUNK_ELEMS`) keeps all workers active without falling back to scalar copies.  
+  (`compare_numpy_raptors.py --shape 2048x2048 --dtype float32 --operations scale --simd-mode force --warmup 1 --repeats 10`)
 - `float64` @ `1024²` `scale`: **0.40 ms** (NumPy 0.48 ms, 1.20×) — widened SIMD loop with Rayon chunking beats NumPy at medium sizes.  
   (`compare_numpy_raptors.py --suite 2d --simd-mode force --warmup 1 --repeats 7`)
 - Column broadcast add remains close: `float32` @ `2048²` ≈0.62× by default; a matrixmultiply-powered prototype exists but is currently disabled pending accuracy tuning.

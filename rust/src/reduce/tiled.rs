@@ -320,9 +320,9 @@ mod tests {
 
     #[test]
     fn direct_sum_matches_scalar_sum_for_small_inputs() {
-        let data: Vec<f64> = (0..16).map(|value| value as f64).collect();
-        let expected: f64 = data.iter().copied().sum();
-        let total = direct_sum_f64(&data, 4, 4, None);
+        let data: Vec<f32> = (0..16).map(|value| value as f32).collect();
+        let expected: f64 = data.iter().map(|&value| value as f64).sum();
+        let total = direct_sum_f32(&data, 4, 4, None);
         assert_eq!(total, expected);
     }
 
