@@ -2,9 +2,9 @@
 set -euo pipefail
 
 OUTPUT_DIR="benchmarks/results/latest"
-VALIDATE_SLACK="0.05"
-SIMD_REPEATS="11"
-SIMD_WARMUP="2"
+VALIDATE_SLACK="${VALIDATE_SLACK:-0.05}"
+SIMD_REPEATS="${SIMD_REPEATS:-21}"
+SIMD_WARMUP="${SIMD_WARMUP:-2}"
 AXIS0_OUTPUT="$OUTPUT_DIR/axis0_suite.json"
 
 usage() {
@@ -95,6 +95,8 @@ run_benchmark "float64 scalar baseline" \
   --output-json "$RA64_SCALAR" \
   --validate-json benchmarks/baselines/2d_float64_scalar.json \
   --validate-slack "$VALIDATE_SLACK"
+
+sleep 1
 
 run_benchmark "float32 scalar baseline" \
   --suite 2d \

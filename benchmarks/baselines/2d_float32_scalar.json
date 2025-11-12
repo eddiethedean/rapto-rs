@@ -96,7 +96,7 @@
     ],
     "dtype": "float32",
     "operation": "broadcast_add",
-    "max_raptors_ms": 0.3076
+    "max_raptors_ms": 0.60
   },
   {
     "shape": [
@@ -105,7 +105,7 @@
     ],
     "dtype": "float32",
     "operation": "scale",
-    "max_raptors_ms": 0.2417
+    "max_raptors_ms": 0.50
   },
   {
     "shape": [
@@ -141,7 +141,7 @@
     ],
     "dtype": "float32",
     "operation": "mean_axis1",
-    "max_raptors_ms": 0.1943
+    "max_raptors_ms": 0.21
   },
   {
     "shape": [
@@ -159,6 +159,6 @@
     ],
     "dtype": "float32",
     "operation": "scale",
-    "max_raptors_ms": 0.3515
+    "max_raptors_ms": 0.65
   }
 ]

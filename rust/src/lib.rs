@@ -80,16 +80,15 @@ trait NumericElement:
 }
 
 fn simd_is_enabled() -> bool {
+    if let Ok(flag) = env::var("RAPTORS_SIMD") {
+        match flag.trim().to_ascii_lowercase().as_str() {
+            "0" | "false" | "off" => return false,
+            "1" | "true" | "on" => return true,
+            _ => {}
+        }
+    }
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
-        if let Ok(flag) = env::var("RAPTORS_SIMD") {
-            match flag.trim().to_ascii_lowercase().as_str() {
-                "0" | "false" | "off" => return false,
-                "1" | "true" | "on" => return true,
-                _ => {}
-            }
-        }
-
         #[cfg(target_arch = "x86_64")]
         {
             return std::arch::is_x86_feature_detected!("sse2");
@@ -173,16 +172,16 @@ const MATRIX_AXIS0_ROW_THRESHOLD_F64: usize = 1536;
 const AXIS0_PAR_MIN_ROWS_F64: usize = 1536;
 const SCALE_PAR_MIN_ROWS: usize = 32;
 const SCALE_PAR_MIN_CHUNK_ELEMS: usize = 1 << 14;
-const SCALE_PAR_MAX_CHUNK_ELEMS: usize = 1 << 18;
+const SCALE_PAR_MAX_CHUNK_ELEMS: usize = 1 << 19;
 const SCALE_BLAS_MIN_LEN: usize = 1 << 12;
 const SCALE_BLAS_MIN_ROWS: usize = 1024;
 const SCALE_BLAS_MIN_COLS: usize = 1024;
-const SCALE_FORCE_PARALLEL_ROWS: usize = 1024;
-const SCALE_FORCE_PARALLEL_COLS: usize = 1024;
+const SCALE_FORCE_PARALLEL_ROWS: usize = 512;
+const SCALE_FORCE_PARALLEL_COLS: usize = 512;
 const SCALE_FORCE_PARALLEL_ELEMS: usize = 1 << 20;
 const AXIS0_BLAS_MAX_ROWS_F64: usize = 1536;
 const AXIS0_BLAS_MIN_ROWS: usize = 512;
-const AXIS0_BLAS_MIN_ROWS_F64: usize = 768;
+const AXIS0_BLAS_MIN_ROWS_F64: usize = 512;
 const AXIS0_BLAS_MIN_COLS: usize = 512;
 const BROADCAST_PAR_MIN_ROWS: usize = 48;
 const BROADCAST_PAR_MIN_COLS: usize = 64;
@@ -191,8 +190,8 @@ const AXIS0_COLUMN_SIMD_MIN_COLS: usize = 32;
 const COLUMN_BROADCAST_DIRECT_MIN_ELEMS: usize = 1 << 20;
 const SMALL_MATRIX_FAST_DIM: usize = 256;
 const SCALE_TINY_DIM: usize = 512;
-const SCALE_PAR_MIN_ELEMS: usize = 1 << 19;
-const SCALE_PAR_MIN_ELEMS_F64: usize = 1 << 19;
+const SCALE_PAR_MIN_ELEMS: usize = 1 << 18;
+const SCALE_PAR_MIN_ELEMS_F64: usize = 1 << 18;
 const OPERATION_SCALE: &str = "scale";
 const OPERATION_BROADCAST_ROW: &str = "broadcast_row";
 const OPERATION_BROADCAST_COL: &str = "broadcast_col";
@@ -283,15 +282,44 @@ enum BroadcastKind {
     Column,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+enum ThreadingMode {
+    Simd,
+    Scalar,
+}
+
+impl Default for ThreadingMode {
+    fn default() -> Self {
+        ThreadingMode::Simd
+    }
+}
+
 #[derive(Default)]
-struct AdaptiveThreadingState {
+struct AdaptiveBucket {
     throughput: HashMap<&'static str, VecDeque<f64>>,
     seq_throughput: HashMap<&'static str, VecDeque<f64>>,
-    axis_parallel: HashMap<(AxisKind, &'static str), VecDeque<f64>>,
-    axis_sequential: HashMap<(AxisKind, &'static str), VecDeque<f64>>,
     op_parallel: HashMap<(&'static str, &'static str), VecDeque<f64>>,
     op_sequential: HashMap<(&'static str, &'static str), VecDeque<f64>>,
+}
+
+struct AdaptiveThreadingState {
+    simd: AdaptiveBucket,
+    scalar: AdaptiveBucket,
+    axis_parallel: HashMap<(AxisKind, &'static str), VecDeque<f64>>,
+    axis_sequential: HashMap<(AxisKind, &'static str), VecDeque<f64>>,
     last_event: Option<ThreadingEvent>,
+}
+
+impl Default for AdaptiveThreadingState {
+    fn default() -> Self {
+        Self {
+            simd: AdaptiveBucket::default(),
+            scalar: AdaptiveBucket::default(),
+            axis_parallel: HashMap::new(),
+            axis_sequential: HashMap::new(),
+            last_event: None,
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -316,7 +344,7 @@ struct ThresholdEntry {
     seq_samples: Vec<f64>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Copy, Default)]
 struct ThreadingEvent {
     dtype: &'static str,
     elements: usize,
@@ -325,6 +353,7 @@ struct ThreadingEvent {
     partial_buffer: usize,
     parallel: bool,
     operation: &'static str,
+    mode: ThreadingMode,
 }
 
 static ADAPTIVE_STATE: OnceLock<Mutex<AdaptiveThreadingState>> = OnceLock::new();
@@ -392,32 +421,298 @@ fn adaptive_state() -> &'static Mutex<AdaptiveThreadingState> {
     ADAPTIVE_STATE.get_or_init(|| Mutex::new(AdaptiveThreadingState::default()))
 }
 
-impl AdaptiveThreadingState {
-    fn record(&mut self, event: ThreadingEvent) {
-        if event.duration_ms > 0.0 && event.elements > 0 {
-            let throughput = event.elements as f64 / event.duration_ms;
-            if throughput.is_finite() && throughput > 0.0 {
-                if event.parallel {
-                    Self::push_sample(&mut self.throughput, event.dtype, throughput);
-                    if !event.operation.is_empty() {
-                        Self::push_sample(
-                            &mut self.op_parallel,
-                            (event.operation, event.dtype),
-                            throughput,
-                        );
-                    }
-                } else {
-                    Self::push_sample(&mut self.seq_throughput, event.dtype, throughput);
-                    if !event.operation.is_empty() {
-                        Self::push_sample(
-                            &mut self.op_sequential,
-                            (event.operation, event.dtype),
-                            throughput,
-                        );
-                    }
-                }
+impl AdaptiveBucket {
+    fn push_sample<K>(map: &mut HashMap<K, VecDeque<f64>>, key: K, value: f64)
+    where
+        K: Eq + Hash,
+    {
+        let deque = map.entry(key).or_default();
+        if deque.len() == ADAPTIVE_SAMPLE_WINDOW {
+            deque.pop_front();
+        }
+        deque.push_back(value);
+    }
+
+    fn median_from_deque(values: &VecDeque<f64>) -> Option<f64> {
+        if values.is_empty() {
+            return None;
+        }
+        let mut sorted = values.iter().copied().collect::<Vec<_>>();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+        let mid = sorted.len() / 2;
+        if sorted.len() % 2 == 0 && mid > 0 {
+            Some((sorted[mid - 1] + sorted[mid]) / 2.0)
+        } else {
+            Some(sorted[mid])
+        }
+    }
+
+    fn percentile_from_deque(values: &VecDeque<f64>, percentile: f64) -> Option<f64> {
+        if values.is_empty() {
+            return None;
+        }
+        let mut sorted = values.iter().copied().collect::<Vec<_>>();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+        let pct = percentile.clamp(0.0, 1.0);
+        let max_index = sorted.len().saturating_sub(1);
+        let position = pct * max_index as f64;
+        let lower = position.floor() as usize;
+        let upper = position.ceil() as usize;
+        if lower == upper {
+            Some(sorted[lower])
+        } else {
+            let weight = position - lower as f64;
+            Some(sorted[lower] * (1.0 - weight) + sorted[upper] * weight)
+        }
+    }
+
+    fn median_from_map<K>(
+        map: &HashMap<K, VecDeque<f64>>,
+        key: K,
+    ) -> Option<f64>
+    where
+        K: Eq + Hash + Copy,
+    {
+        let values = map.get(&key)?;
+        Self::median_from_deque(values)
+    }
+
+    fn percentile_from_map<K>(
+        map: &HashMap<K, VecDeque<f64>>,
+        key: K,
+        percentile: f64,
+    ) -> Option<f64>
+    where
+        K: Eq + Hash + Copy,
+    {
+        let values = map.get(&key)?;
+        Self::percentile_from_deque(values, percentile)
+    }
+
+    fn record_event(&mut self, event: &ThreadingEvent) {
+        if event.duration_ms <= 0.0 || event.elements == 0 {
+            return;
+        }
+        let throughput = event.elements as f64 / event.duration_ms;
+        if !throughput.is_finite() || throughput <= 0.0 {
+            return;
+        }
+        if event.parallel {
+            Self::push_sample(&mut self.throughput, event.dtype, throughput);
+            if !event.operation.is_empty() {
+                Self::push_sample(
+                    &mut self.op_parallel,
+                    (event.operation, event.dtype),
+                    throughput,
+                );
+            }
+        } else {
+            Self::push_sample(&mut self.seq_throughput, event.dtype, throughput);
+            if !event.operation.is_empty() {
+                Self::push_sample(
+                    &mut self.op_sequential,
+                    (event.operation, event.dtype),
+                    throughput,
+                );
             }
         }
+    }
+
+    fn median(&self, dtype: &'static str) -> Option<f64> {
+        Self::median_from_map(&self.throughput, dtype)
+    }
+
+    fn median_seq(&self, dtype: &'static str) -> Option<f64> {
+        Self::median_from_map(&self.seq_throughput, dtype)
+    }
+
+    fn percentile(
+        &self,
+        dtype: &'static str,
+        percentile: f64,
+        parallel: bool,
+    ) -> Option<f64> {
+        if parallel {
+            Self::percentile_from_map(&self.throughput, dtype, percentile)
+        } else {
+            Self::percentile_from_map(&self.seq_throughput, dtype, percentile)
+        }
+    }
+
+    fn operation_median(
+        &self,
+        operation: &'static str,
+        dtype: &'static str,
+        parallel: bool,
+    ) -> Option<f64> {
+        let key = (operation, dtype);
+        if parallel {
+            Self::median_from_map(&self.op_parallel, key)
+        } else {
+            Self::median_from_map(&self.op_sequential, key)
+        }
+    }
+
+    fn operation_sample_count(
+        &self,
+        operation: &'static str,
+        dtype: &'static str,
+        parallel: bool,
+    ) -> usize {
+        let key = (operation, dtype);
+        let map = if parallel {
+            &self.op_parallel
+        } else {
+            &self.op_sequential
+        };
+        map.get(&key).map(VecDeque::len).unwrap_or(0)
+    }
+
+    fn operation_percentile(
+        &self,
+        operation: &'static str,
+        dtype: &'static str,
+        parallel: bool,
+        percentile: f64,
+    ) -> Option<f64> {
+        let key = (operation, dtype);
+        if parallel {
+            Self::percentile_from_map(&self.op_parallel, key, percentile)
+        } else {
+            Self::percentile_from_map(&self.op_sequential, key, percentile)
+        }
+    }
+
+    fn samples(&self, dtype: &'static str, parallel: bool) -> Vec<f64> {
+        let map = if parallel {
+            &self.throughput
+        } else {
+            &self.seq_throughput
+        };
+        map.get(dtype)
+            .map(|deque| deque.iter().copied().collect::<Vec<f64>>())
+            .unwrap_or_default()
+    }
+}
+
+impl AdaptiveThreadingState {
+    fn bucket(&self, mode: ThreadingMode) -> &AdaptiveBucket {
+        match mode {
+            ThreadingMode::Simd => &self.simd,
+            ThreadingMode::Scalar => &self.scalar,
+        }
+    }
+
+    fn bucket_mut(&mut self, mode: ThreadingMode) -> &mut AdaptiveBucket {
+        match mode {
+            ThreadingMode::Simd => &mut self.simd,
+            ThreadingMode::Scalar => &mut self.scalar,
+        }
+    }
+
+    fn median_mode(&self, dtype: &'static str, mode: ThreadingMode) -> Option<f64> {
+        self.bucket(mode).median(dtype)
+    }
+
+    fn median_seq_mode(&self, dtype: &'static str, mode: ThreadingMode) -> Option<f64> {
+        self.bucket(mode).median_seq(dtype)
+    }
+
+    fn percentile_mode(
+        &self,
+        dtype: &'static str,
+        percentile: f64,
+        parallel: bool,
+        mode: ThreadingMode,
+    ) -> Option<f64> {
+        self.bucket(mode).percentile(dtype, percentile, parallel)
+    }
+
+    fn operation_median_mode(
+        &self,
+        operation: &'static str,
+        dtype: &'static str,
+        parallel: bool,
+        mode: ThreadingMode,
+    ) -> Option<f64> {
+        self.bucket(mode)
+            .operation_median(operation, dtype, parallel)
+    }
+
+    fn operation_sample_count_mode(
+        &self,
+        operation: &'static str,
+        dtype: &'static str,
+        parallel: bool,
+        mode: ThreadingMode,
+    ) -> usize {
+        self.bucket(mode)
+            .operation_sample_count(operation, dtype, parallel)
+    }
+
+    fn operation_percentile_mode(
+        &self,
+        operation: &'static str,
+        dtype: &'static str,
+        parallel: bool,
+        percentile: f64,
+        mode: ThreadingMode,
+    ) -> Option<f64> {
+        self.bucket(mode)
+            .operation_percentile(operation, dtype, parallel, percentile)
+    }
+
+    fn recommend_cutover_mode(
+        &self,
+        dtype: &'static str,
+        mode: ThreadingMode,
+    ) -> Option<usize> {
+        let median = self.median_mode(dtype, mode)?;
+        if median <= 0.0 {
+            return None;
+        }
+        let seq_median = self.median_seq_mode(dtype, mode).unwrap_or(0.0);
+        let effective_median = if seq_median > 0.0 && seq_median >= median {
+            seq_median
+        } else {
+            median
+        };
+        let target = target_latency_ms(dtype);
+        if target <= 0.0 {
+            return None;
+        }
+        let cutover = (effective_median * target).ceil() as usize;
+        Some(cutover.max(1))
+    }
+
+    fn recommend_cutover_op_mode(
+        &self,
+        operation: &'static str,
+        dtype: &'static str,
+        mode: ThreadingMode,
+    ) -> Option<usize> {
+        let median = self.operation_median_mode(operation, dtype, true, mode)?;
+        if median <= 0.0 {
+            return None;
+        }
+        let seq_median = self
+            .operation_median_mode(operation, dtype, false, mode)
+            .unwrap_or(0.0);
+        let effective_median = if seq_median > 0.0 && seq_median >= median {
+            seq_median
+        } else {
+            median
+        };
+        let target = target_latency_ms(dtype);
+        if target <= 0.0 {
+            return None;
+        }
+        let cutover = (effective_median * target).ceil() as usize;
+        Some(cutover.max(1))
+    }
+
+    fn record(&mut self, event: ThreadingEvent) {
+        self.bucket_mut(event.mode).record_event(&event);
         self.last_event = Some(event);
     }
 
@@ -496,14 +791,6 @@ impl AdaptiveThreadingState {
         }
     }
 
-    fn median(&self, dtype: &'static str) -> Option<f64> {
-        self.median_from_map(&self.throughput, dtype)
-    }
-
-    fn median_seq(&self, dtype: &'static str) -> Option<f64> {
-        self.median_from_map(&self.seq_throughput, dtype)
-    }
-
     fn percentile_from_map<K>(
         &self,
         map: &HashMap<K, VecDeque<f64>>,
@@ -518,11 +805,7 @@ impl AdaptiveThreadingState {
     }
 
     fn percentile(&self, dtype: &'static str, percentile: f64, parallel: bool) -> Option<f64> {
-        if parallel {
-            self.percentile_from_map(&self.throughput, dtype, percentile)
-        } else {
-            self.percentile_from_map(&self.seq_throughput, dtype, percentile)
-        }
+        self.percentile_mode(dtype, percentile, parallel, ThreadingMode::Simd)
     }
 
     fn axis_median(&self, axis: AxisKind, dtype: &'static str, parallel: bool) -> Option<f64> {
@@ -550,12 +833,7 @@ impl AdaptiveThreadingState {
         dtype: &'static str,
         parallel: bool,
     ) -> Option<f64> {
-        let key = (operation, dtype);
-        if parallel {
-            self.median_from_map(&self.op_parallel, key)
-        } else {
-            self.median_from_map(&self.op_sequential, key)
-        }
+        self.operation_median_mode(operation, dtype, parallel, ThreadingMode::Simd)
     }
 
     fn operation_sample_count(
@@ -564,13 +842,7 @@ impl AdaptiveThreadingState {
         dtype: &'static str,
         parallel: bool,
     ) -> usize {
-        let key = (operation, dtype);
-        let map = if parallel {
-            &self.op_parallel
-        } else {
-            &self.op_sequential
-        };
-        map.get(&key).map(VecDeque::len).unwrap_or(0)
+        self.operation_sample_count_mode(operation, dtype, parallel, ThreadingMode::Simd)
     }
 
     fn operation_percentile(
@@ -580,70 +852,31 @@ impl AdaptiveThreadingState {
         parallel: bool,
         percentile: f64,
     ) -> Option<f64> {
-        let key = (operation, dtype);
-        if parallel {
-            self.percentile_from_map(&self.op_parallel, key, percentile)
-        } else {
-            self.percentile_from_map(&self.op_sequential, key, percentile)
-        }
+        self.operation_percentile_mode(
+            operation,
+            dtype,
+            parallel,
+            percentile,
+            ThreadingMode::Simd,
+        )
     }
 
     fn recommend_cutover(&self, dtype: &'static str) -> Option<usize> {
-        let median = self.median(dtype)?;
-        if median <= 0.0 {
-            return None;
-        }
-        let seq_median = self.median_seq(dtype).unwrap_or(0.0);
-        let effective_median = if seq_median > 0.0 && seq_median >= median {
-            seq_median
-        } else {
-            median
-        };
-        let target = target_latency_ms(dtype);
-        if target <= 0.0 {
-            return None;
-        }
-        let cutover = (effective_median * target).ceil() as usize;
-        Some(cutover.max(1))
+        self.recommend_cutover_mode(dtype, ThreadingMode::Simd)
     }
 
     fn recommend_cutover_op(&self, operation: &'static str, dtype: &'static str) -> Option<usize> {
-        let median = self.operation_median(operation, dtype, true)?;
-        if median <= 0.0 {
-            return None;
-        }
-        let seq_median = self
-            .operation_median(operation, dtype, false)
-            .unwrap_or(0.0);
-        let effective_median = if seq_median > 0.0 && seq_median >= median {
-            seq_median
-        } else {
-            median
-        };
-        let target = target_latency_ms(dtype);
-        if target <= 0.0 {
-            return None;
-        }
-        let cutover = (effective_median * target).ceil() as usize;
-        Some(cutover.max(1))
+        self.recommend_cutover_op_mode(operation, dtype, ThreadingMode::Simd)
     }
 
     fn snapshot(&self) -> ThreadingSnapshot {
         let mut thresholds = Vec::with_capacity(TRACKED_DTYPES.len());
         for &dtype in TRACKED_DTYPES {
-            let samples_list = self
-                .throughput
-                .get(dtype)
-                .map(|deque| deque.iter().copied().collect::<Vec<f64>>())
-                .unwrap_or_default();
-            let median = self.median(dtype).unwrap_or(0.0);
+            let samples_list = self.simd.samples(dtype, true);
+            let median = self.simd.median(dtype).unwrap_or(0.0);
             let p95 = self.percentile(dtype, 0.95, true);
-            let seq_samples_list = self
-                .seq_throughput
-                .get(dtype)
-                .map(|deque| deque.iter().copied().collect::<Vec<f64>>())
-                .unwrap_or_default();
-            let seq_median = self.median_seq(dtype).unwrap_or(0.0);
+            let seq_samples_list = self.simd.samples(dtype, false);
+            let seq_median = self.simd.median_seq(dtype).unwrap_or(0.0);
             let seq_p95 = self.percentile(dtype, 0.95, false);
             let recommended = self.recommend_cutover(dtype);
             thresholds.push(ThresholdEntry {
@@ -713,6 +946,14 @@ fn dimension_gate(rows: usize, cols: usize, dtype: &'static str) -> bool {
     rows >= min_rows && cols >= min_cols
 }
 
+fn current_threading_mode() -> ThreadingMode {
+    if simd_is_enabled() {
+        ThreadingMode::Simd
+    } else {
+        ThreadingMode::Scalar
+    }
+}
+
 fn record_threading_event(
     dtype: &'static str,
     elements: usize,
@@ -732,6 +973,7 @@ fn record_threading_event(
         partial_buffer: outcome.partial_buffer,
         parallel: outcome.parallel,
         operation,
+        mode: current_threading_mode(),
     };
     if let Ok(mut guard) = adaptive_state().lock() {
         guard.record(event);
@@ -764,6 +1006,7 @@ fn record_axis_strategy_event(
         partial_buffer: cols,
         parallel: true,
         operation: strategy,
+        mode: current_threading_mode(),
     };
     if let Ok(mut guard) = adaptive_state().lock() {
         guard.record(event);
@@ -828,6 +1071,7 @@ fn record_scale_event(
         partial_buffer: cols,
         parallel,
         operation: "scale",
+        mode: current_threading_mode(),
     };
     if let Ok(mut guard) = adaptive_state().lock() {
         guard.record(event);
@@ -865,46 +1109,51 @@ fn record_broadcast_event(
         partial_buffer: cols,
         parallel,
         operation: broadcast_operation_name(kind),
+        mode: current_threading_mode(),
     };
     if let Ok(mut guard) = adaptive_state().lock() {
         guard.record(event);
     }
 }
 
-fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
+fn scale_parallel_policy(dtype: &'static str, mode: ThreadingMode) -> (usize, bool) {
     let mut cutover = match dtype {
         "float64" => SCALE_PAR_MIN_ELEMS_F64,
         _ => SCALE_PAR_MIN_ELEMS,
     };
     let mut prefer_parallel = true;
     if let Ok(guard) = adaptive_state().lock() {
-        if let Some(recommended) = guard.recommend_cutover_op(OPERATION_SCALE, dtype) {
+        if let Some(recommended) =
+            guard.recommend_cutover_op_mode(OPERATION_SCALE, dtype, mode)
+        {
             cutover = cutover.max(recommended);
-        } else if let Some(recommended) = guard.recommend_cutover(dtype) {
+        } else if let Some(recommended) = guard.recommend_cutover_mode(dtype, mode) {
             cutover = cutover.max(recommended);
         }
-        let par_samples = guard.operation_sample_count(OPERATION_SCALE, dtype, true);
-        let seq_samples = guard.operation_sample_count(OPERATION_SCALE, dtype, false);
+        let par_samples =
+            guard.operation_sample_count_mode(OPERATION_SCALE, dtype, true, mode);
+        let seq_samples =
+            guard.operation_sample_count_mode(OPERATION_SCALE, dtype, false, mode);
         if seq_samples >= 6 && par_samples == 0 {
             prefer_parallel = false;
         }
         if par_samples >= 2 && seq_samples >= 1 {
             if let (Some(par_median), Some(seq_median)) = (
-                guard.operation_median(OPERATION_SCALE, dtype, true),
-                guard.operation_median(OPERATION_SCALE, dtype, false),
+                guard.operation_median_mode(OPERATION_SCALE, dtype, true, mode),
+                guard.operation_median_mode(OPERATION_SCALE, dtype, false, mode),
             ) {
                 if par_median <= seq_median * 1.05 {
                     prefer_parallel = false;
                 }
                 if let Some(par_p95) =
-                    guard.operation_percentile(OPERATION_SCALE, dtype, true, 0.95)
+                    guard.operation_percentile_mode(OPERATION_SCALE, dtype, true, 0.95, mode)
                 {
                     if par_median > 0.0 && par_p95 >= par_median * 1.35 {
                         prefer_parallel = false;
                     }
                 }
                 if let Some(seq_p95) =
-                    guard.operation_percentile(OPERATION_SCALE, dtype, false, 0.95)
+                    guard.operation_percentile_mode(OPERATION_SCALE, dtype, false, 0.95, mode)
                 {
                     if seq_median > 0.0 && seq_p95 <= seq_median * 1.05 {
                         prefer_parallel = false;
@@ -917,8 +1166,8 @@ fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
                     cutover = cutover.max(op_cutover.max(1));
                 }
                 if let (Some(par_p95), Some(seq_p95)) = (
-                    guard.operation_percentile(OPERATION_SCALE, dtype, true, 0.95),
-                    guard.operation_percentile(OPERATION_SCALE, dtype, false, 0.95),
+                    guard.operation_percentile_mode(OPERATION_SCALE, dtype, true, 0.95, mode),
+                    guard.operation_percentile_mode(OPERATION_SCALE, dtype, false, 0.95, mode),
                 ) {
                     if par_p95 <= seq_p95 * 1.08 {
                         prefer_parallel = false;
@@ -930,7 +1179,7 @@ fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
                         cutover = cutover.max(op_cutover.max(1));
                     }
                 } else if let Some(par_p95) =
-                    guard.operation_percentile(OPERATION_SCALE, dtype, true, 0.95)
+                    guard.operation_percentile_mode(OPERATION_SCALE, dtype, true, 0.95, mode)
                 {
                     let target = target_latency_ms(dtype);
                     if target > 0.0 {
@@ -938,7 +1187,7 @@ fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
                         cutover = cutover.max(op_cutover.max(1));
                     }
                 } else if let Some(seq_p95) =
-                    guard.operation_percentile(OPERATION_SCALE, dtype, false, 0.95)
+                    guard.operation_percentile_mode(OPERATION_SCALE, dtype, false, 0.95, mode)
                 {
                     let target = target_latency_ms(dtype);
                     if target > 0.0 {
@@ -948,18 +1197,20 @@ fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
                     prefer_parallel = false;
                 }
             }
-        } else if let (Some(par_median), Some(seq_median)) =
-            (guard.median(dtype), guard.median_seq(dtype))
+        } else if let (Some(par_median), Some(seq_median)) = (
+            guard.median_mode(dtype, mode),
+            guard.median_seq_mode(dtype, mode),
+        )
         {
             if par_median <= seq_median * 1.05 {
                 prefer_parallel = false;
             }
-            if let Some(par_p95) = guard.percentile(dtype, 0.95, true) {
+            if let Some(par_p95) = guard.percentile_mode(dtype, 0.95, true, mode) {
                 if par_median > 0.0 && par_p95 >= par_median * 1.35 {
                     prefer_parallel = false;
                 }
             }
-            if let Some(seq_p95) = guard.percentile(dtype, 0.95, false) {
+            if let Some(seq_p95) = guard.percentile_mode(dtype, 0.95, false, mode) {
                 if seq_median > 0.0 && seq_p95 <= seq_median * 1.05 {
                     prefer_parallel = false;
                 }
@@ -968,6 +1219,100 @@ fn scale_parallel_policy(dtype: &'static str) -> (usize, bool) {
     }
     (cutover, prefer_parallel)
 }
+
+#[inline]
+fn scale_block_scalar_f32(src: &[f32], factor: f32, dst: &mut [f32]) {
+    let len = src.len().min(dst.len());
+    let mut i = 0usize;
+    const UNROLL: usize = 16;
+    unsafe {
+        let src_ptr = src.as_ptr();
+        let dst_ptr = dst.as_mut_ptr();
+        let fast_end = len / UNROLL * UNROLL;
+        while i < fast_end {
+            *dst_ptr.add(i) = *src_ptr.add(i) * factor;
+            *dst_ptr.add(i + 1) = *src_ptr.add(i + 1) * factor;
+            *dst_ptr.add(i + 2) = *src_ptr.add(i + 2) * factor;
+            *dst_ptr.add(i + 3) = *src_ptr.add(i + 3) * factor;
+            *dst_ptr.add(i + 4) = *src_ptr.add(i + 4) * factor;
+            *dst_ptr.add(i + 5) = *src_ptr.add(i + 5) * factor;
+            *dst_ptr.add(i + 6) = *src_ptr.add(i + 6) * factor;
+            *dst_ptr.add(i + 7) = *src_ptr.add(i + 7) * factor;
+            *dst_ptr.add(i + 8) = *src_ptr.add(i + 8) * factor;
+            *dst_ptr.add(i + 9) = *src_ptr.add(i + 9) * factor;
+            *dst_ptr.add(i + 10) = *src_ptr.add(i + 10) * factor;
+            *dst_ptr.add(i + 11) = *src_ptr.add(i + 11) * factor;
+            *dst_ptr.add(i + 12) = *src_ptr.add(i + 12) * factor;
+            *dst_ptr.add(i + 13) = *src_ptr.add(i + 13) * factor;
+            *dst_ptr.add(i + 14) = *src_ptr.add(i + 14) * factor;
+            *dst_ptr.add(i + 15) = *src_ptr.add(i + 15) * factor;
+            i += UNROLL;
+        }
+        while i < len {
+            *dst_ptr.add(i) = *src_ptr.add(i) * factor;
+            i += 1;
+        }
+    }
+}
+
+#[inline]
+fn scale_block_scalar_f64(src: &[f64], factor: f64, dst: &mut [f64]) {
+    let len = src.len().min(dst.len());
+    let mut i = 0usize;
+    const UNROLL: usize = 8;
+    unsafe {
+        let src_ptr = src.as_ptr();
+        let dst_ptr = dst.as_mut_ptr();
+        let fast_end = len / UNROLL * UNROLL;
+        while i < fast_end {
+            *dst_ptr.add(i) = *src_ptr.add(i) * factor;
+            *dst_ptr.add(i + 1) = *src_ptr.add(i + 1) * factor;
+            *dst_ptr.add(i + 2) = *src_ptr.add(i + 2) * factor;
+            *dst_ptr.add(i + 3) = *src_ptr.add(i + 3) * factor;
+            *dst_ptr.add(i + 4) = *src_ptr.add(i + 4) * factor;
+            *dst_ptr.add(i + 5) = *src_ptr.add(i + 5) * factor;
+            *dst_ptr.add(i + 6) = *src_ptr.add(i + 6) * factor;
+            *dst_ptr.add(i + 7) = *src_ptr.add(i + 7) * factor;
+            i += UNROLL;
+        }
+        while i < len {
+            *dst_ptr.add(i) = *src_ptr.add(i) * factor;
+            i += 1;
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[inline]
+fn accelerate_vsmul_f32(src: &[f32], factor: f32, dst: &mut [f32]) -> bool {
+    if src.len() != dst.len() {
+        return false;
+    }
+    extern "C" {
+        fn vDSP_vsmul(
+            __A: *const f32,
+            __IA: isize,
+            __C: *const f32,
+            __Z: *mut f32,
+            __IZ: isize,
+            __N: usize,
+        );
+    }
+    unsafe {
+        vDSP_vsmul(src.as_ptr(), 1, &factor, dst.as_mut_ptr(), 1, src.len());
+    }
+    true
+}
+
+#[cfg(not(target_os = "macos"))]
+#[inline]
+fn accelerate_vsmul_f32(src: &[f32], factor: f32, dst: &mut [f32]) -> bool {
+    let _ = (src, factor, dst);
+    false
+}
+
+#[cfg(target_os = "macos")]
+#[inline]
 fn threading_snapshot() -> ThreadingSnapshot {
     adaptive_state()
         .lock()
@@ -1015,11 +1360,12 @@ fn should_parallelize(rows: usize, cols: usize, dtype: &'static str) -> bool {
         return false;
     }
     let elements = rows.saturating_mul(cols);
+    let mode = current_threading_mode();
     let baseline = baseline_cutover(dtype);
     let threshold = adaptive_state()
         .lock()
         .ok()
-        .and_then(|guard| guard.recommend_cutover(dtype))
+        .and_then(|guard| guard.recommend_cutover_mode(dtype, mode))
         .map(|value| value.max(baseline))
         .unwrap_or(baseline);
     elements >= threshold
@@ -1168,7 +1514,16 @@ fn parallel_scale_f64(
         let min_rows = (SCALE_PAR_MIN_CHUNK_ELEMS / cols)
             .max(SCALE_PAR_MIN_ROWS)
             .min(rows.max(1));
-        let chunk_rows = base_rows.clamp(min_rows, max_rows);
+        let mut chunk_rows = base_rows.clamp(min_rows, max_rows);
+        if rows >= 2 * SCALE_PAR_MIN_ROWS {
+            let alignment = if rows >= 1024 { 128 } else { 64 };
+            if chunk_rows >= alignment {
+                let aligned = (chunk_rows / alignment).max(1) * alignment;
+                if aligned <= max_rows {
+                    chunk_rows = aligned.max(min_rows).min(max_rows).min(rows);
+                }
+            }
+        }
         let chunk_elems = cols.saturating_mul(chunk_rows.max(1)).min(input.len());
         let start = Instant::now();
         pool.install(|| {
@@ -1180,9 +1535,7 @@ fn parallel_scale_f64(
                     let end = start + dst_block.len();
                     let src_block = &input[start..end];
                     if !simd::scale_same_shape_f64(src_block, factor, dst_block) {
-                        for (dst, &value) in dst_block.iter_mut().zip(src_block.iter()) {
-                            *dst = value * factor;
-                        }
+                        scale_block_scalar_f64(src_block, factor, dst_block);
                     }
                 });
         });
@@ -1213,11 +1566,21 @@ fn parallel_scale_f32(
         let min_rows = (SCALE_PAR_MIN_CHUNK_ELEMS / cols)
             .max(SCALE_PAR_MIN_ROWS)
             .min(rows.max(1));
-        let chunk_rows = base_rows.clamp(min_rows, max_rows);
-        let chunk_elems = cols.saturating_mul(chunk_rows.max(1)).min(input.len());
+        let mut chunk_rows = base_rows.clamp(min_rows, max_rows);
+        if rows >= 2 * SCALE_PAR_MIN_ROWS {
+            let alignment = if rows >= 1024 { 128 } else { 64 };
+            if chunk_rows >= alignment {
+                let aligned = (chunk_rows / alignment).max(1) * alignment;
+                if aligned <= max_rows {
+                    chunk_rows = aligned.max(min_rows).min(max_rows).min(rows);
+                }
+            }
+        }
+        let min_rows = chunk_rows.max(1);
         let start = Instant::now();
         pool.install(|| {
             use rayon::prelude::*;
+            let chunk_elems = cols.saturating_mul(min_rows).min(input.len());
             out.par_chunks_mut(chunk_elems)
                 .enumerate()
                 .for_each(|(chunk_index, dst_block)| {
@@ -1225,8 +1588,8 @@ fn parallel_scale_f32(
                     let end = start + dst_block.len();
                     let src_block = &input[start..end];
                     if !simd::scale_same_shape_f32(src_block, factor_f32, dst_block) {
-                        for (dst, &value) in dst_block.iter_mut().zip(src_block.iter()) {
-                            *dst = value * factor_f32;
+                        if !accelerate_vsmul_f32(src_block, factor_f32, dst_block) {
+                            scale_block_scalar_f32(src_block, factor_f32, dst_block);
                         }
                     }
                 });
@@ -2370,6 +2733,20 @@ where
             {
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
+            let simd_enabled = simd_is_enabled();
+            let mode = if simd_enabled {
+                ThreadingMode::Simd
+            } else {
+                ThreadingMode::Scalar
+            };
+            let allow_scalar_blas = !simd_enabled && rows <= 512 && cols >= SCALE_PAR_MIN_ROWS;
+            if (simd_enabled || allow_scalar_blas) && rows <= 512 && cols >= SCALE_PAR_MIN_ROWS {
+                out.copy_from_slice(input);
+                if blas::current_backend().dscal_f64(len, factor, out) {
+                    record_scale_event("float64", rows, cols, start.elapsed(), false);
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+            }
             if blas::scale_enabled()
                 && len >= SCALE_BLAS_MIN_LEN
                 && rows >= SCALE_BLAS_MIN_ROWS
@@ -2383,34 +2760,40 @@ where
             }
             if len <= SMALL_DIRECT_THRESHOLD {
                 if !simd::scale_same_shape_f64(input, factor, out) {
-                    for (dst, &value) in out.iter_mut().zip(input.iter()) {
-                        *dst = value * factor;
-                    }
+                    scale_block_scalar_f64(input, factor, out);
                 }
                 record_scale_event("float64", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
                 if !simd::scale_same_shape_f64(input, factor, out) {
-                    for (dst, &value) in out.iter_mut().zip(input.iter()) {
-                        *dst = value * factor;
-                    }
+                    scale_block_scalar_f64(input, factor, out);
                 }
                 record_scale_event("float64", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if rows <= SCALE_TINY_DIM && cols <= SCALE_TINY_DIM {
                 if !simd::scale_same_shape_f64(input, factor, out) {
-                    for (dst, &value) in out.iter_mut().zip(input.iter()) {
-                        *dst = value * factor;
-                    }
+                    scale_block_scalar_f64(input, factor, out);
                 }
                 record_scale_event("float64", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
-            let (parallel_cutover, prefer_parallel) = scale_parallel_policy("float64");
+            if rows <= 512 && cols <= 512 {
+                if !simd::scale_same_shape_f64(input, factor, out) {
+                    scale_block_scalar_f64(input, factor, out);
+                }
+                record_scale_event("float64", rows, cols, start.elapsed(), false);
+                return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            let (parallel_cutover, prefer_parallel_raw) = scale_parallel_policy("float64", mode);
             let base_parallel = should_parallelize(rows, cols, T::DTYPE_NAME);
             let elements = rows.saturating_mul(cols);
+            let prefer_parallel = if simd_enabled {
+                true
+            } else {
+                prefer_parallel_raw || elements >= SCALE_FORCE_PARALLEL_ELEMS
+            };
             let should_try_parallel =
                 base_parallel && elements >= parallel_cutover && prefer_parallel;
             let force_parallel = base_parallel
@@ -2430,11 +2813,17 @@ where
             let input = unsafe { std::slice::from_raw_parts(input.as_ptr() as *const f32, len) };
             let out = unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f32, len) };
             let factor_f32 = factor as f32;
-            let use_blas = blas::scale_override().unwrap_or(false)
+            let simd_enabled = simd_is_enabled();
+            let blas_override = blas::scale_override().unwrap_or(false);
+            let allow_scalar_blas = !simd_enabled
                 && len >= SCALE_BLAS_MIN_LEN
                 && rows >= SCALE_BLAS_MIN_ROWS
                 && cols >= SCALE_BLAS_MIN_COLS;
-            if use_blas {
+            if (blas_override || allow_scalar_blas)
+                && len >= SCALE_BLAS_MIN_LEN
+                && rows >= SCALE_BLAS_MIN_ROWS
+                && cols >= SCALE_BLAS_MIN_COLS
+            {
                 out.copy_from_slice(input);
                 if blas::current_backend().sscal_f32(len, factor_f32, out) {
                     record_scale_event("float32", rows, cols, start.elapsed(), false);
@@ -2443,8 +2832,8 @@ where
             }
             if len <= SMALL_DIRECT_THRESHOLD {
                 if !simd::scale_same_shape_f32(input, factor_f32, out) {
-                    for (dst, &value) in out.iter_mut().zip(input.iter()) {
-                        *dst = value * factor_f32;
+                    if !accelerate_vsmul_f32(input, factor_f32, out) {
+                        scale_block_scalar_f32(input, factor_f32, out);
                     }
                 }
                 record_scale_event("float32", rows, cols, start.elapsed(), false);
@@ -2452,8 +2841,8 @@ where
             }
             if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
                 if !simd::scale_same_shape_f32(input, factor_f32, out) {
-                    for (dst, &value) in out.iter_mut().zip(input.iter()) {
-                        *dst = value * factor_f32;
+                    if !accelerate_vsmul_f32(input, factor_f32, out) {
+                        scale_block_scalar_f32(input, factor_f32, out);
                     }
                 }
                 record_scale_event("float32", rows, cols, start.elapsed(), false);
@@ -2461,21 +2850,45 @@ where
             }
             if rows <= SCALE_TINY_DIM && cols <= SCALE_TINY_DIM {
                 if !simd::scale_same_shape_f32(input, factor_f32, out) {
-                    for (dst, &value) in out.iter_mut().zip(input.iter()) {
-                        *dst = value * factor_f32;
+                    if !accelerate_vsmul_f32(input, factor_f32, out) {
+                        scale_block_scalar_f32(input, factor_f32, out);
                     }
                 }
                 record_scale_event("float32", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
-            let (parallel_cutover, prefer_parallel) = scale_parallel_policy("float32");
             let elements = rows.saturating_mul(cols);
+            let mode = if simd_enabled {
+                ThreadingMode::Simd
+            } else {
+                ThreadingMode::Scalar
+            };
+            let (mut parallel_cutover, prefer_parallel_raw) = scale_parallel_policy("float32", mode);
+            if !simd_enabled {
+                parallel_cutover = parallel_cutover.max(SCALE_FORCE_PARALLEL_ELEMS << 1);
+            }
+            let prefer_parallel = if simd_enabled {
+                true
+            } else {
+                prefer_parallel_raw
+            };
             let base_parallel = should_parallelize(rows, cols, T::DTYPE_NAME)
                 || (rows >= SCALE_PAR_MIN_ROWS * 4 && cols >= BROADCAST_PAR_MIN_COLS)
                 || (rows >= SCALE_PAR_MIN_ROWS * 2 && elements >= PARALLEL_MIN_ELEMENTS / 2);
-            let should_try_parallel =
-                base_parallel && elements >= parallel_cutover && prefer_parallel;
-            let force_parallel = base_parallel
+            let large_square = rows >= 4096 && cols >= 4096;
+            let allow_parallel_eval = if simd_enabled {
+                true
+            } else {
+                elements >= PARALLEL_MIN_ELEMENTS
+            };
+            let should_try_parallel = allow_parallel_eval
+                && base_parallel
+                && !large_square
+                && elements >= parallel_cutover
+                && prefer_parallel;
+            let force_parallel = allow_parallel_eval
+                && base_parallel
+                && !large_square
                 && elements >= SCALE_FORCE_PARALLEL_ELEMS
                 && elements >= parallel_cutover;
             let allow_parallel = (should_try_parallel || force_parallel)

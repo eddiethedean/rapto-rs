@@ -14,10 +14,12 @@
   (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float64 --operations broadcast_add --simd-mode force --warmup 1 --repeats 21`)
 - `float32` `broadcast_add` (row vector) @ `1024²`, `--simd-mode disable`: **0.26 ms** (NumPy 0.26 ms, 1.02×) — parity within noise; SIMD mode remains the recommended path for float32.  
   (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float32 --operations broadcast_add --simd-mode disable --warmup 2 --repeats 21`)
-- `float32` `scale` @ `1024²`: **0.43 ms** (NumPy 0.47 ms, 1.10×) — lowering the parallel cutover keeps the SIMD+xRayon path ahead without forcing BLAS.  
-  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float32 --operations scale --simd-mode force --warmup 2 --repeats 21 --output-json benchmarks/results/scale1024/scale_f32_1024_simd_tuned.json`)
-- `float32` `scale` @ `2048²`: **0.37 ms** (NumPy 0.56 ms, 1.52×) — revised chunk scheduling keeps the SIMD kernel bandwidth-bound instead of bouncing between threads.  
-  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 2048x2048 --dtype float32 --operations scale --simd-mode force --warmup 2 --repeats 21 --output-json benchmarks/results/scale1024/scale_f32_2048_simd_tuned.json`)
+- `float32` `scale` @ `1024²`: **0.21 ms** (NumPy 0.26 ms, 1.23×) — row-aligned scheduling keeps the SIMD+xRayon path ahead without forcing BLAS.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float32 --operations scale --simd-mode force --warmup 2 --repeats 60 --output-json benchmarks/results/f32_scale_diag/scale_f32_1024_simd_tuned2.json`)
+- `float32` `scale` @ `2048²`: **0.38 ms** (NumPy 0.44 ms, 1.16×) — large square matrices now use the parallel path again, improving headroom without reintroducing jitter.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 2048x2048 --dtype float32 --operations scale --simd-mode force --warmup 2 --repeats 60 --output-json benchmarks/results/f32_scale_diag/scale_f32_2048_simd_tuned2.json`)
+- `float64` `scale` @ `512²`: **0.11 ms** (NumPy 0.13 ms, 1.15×) — small shapes now dispatch to BLAS automatically after heuristics confirm it wins.  
+  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float64 --operations scale --simd-mode force --warmup 2 --repeats 200 --output-json benchmarks/results/f32_scale_diag/scale_f64_512_simd_tuned2.json`)
 - `float32` @ `512²` `mean_axis0`: **0.021 ms** (NumPy 0.029 ms, 4.8×) — unchanged small-matrix performance with SIMD lanes.  
   (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float32 --operations mean_axis0 --simd-mode force --warmup 2 --repeats 21`)
 
