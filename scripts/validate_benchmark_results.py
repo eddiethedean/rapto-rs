@@ -184,7 +184,11 @@ def main() -> int:
         print(f"[validate] no baseline entries found in {args.baseline_dir}", file=sys.stderr)
         return 1
 
-    json_files: List[Path] = sorted(args.results_dir.glob("*.json"))
+    json_files: List[Path] = sorted(
+        path
+        for path in args.results_dir.glob("*.json")
+        if ".metadata" not in path.name and ".meta" not in path.name
+    )
     if not json_files:
         print(f"[validate] no JSON result files found in {args.results_dir}", file=sys.stderr)
         return 1

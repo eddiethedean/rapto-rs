@@ -1,0 +1,51 @@
+name: Nightly Benchmarks
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  benchmarks:
+    runs-on: ubuntu-latest
+    env:
+      RAPTORS_THREADS: "10"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin pytest matplotlib
+
+      - name: Build extension module
+        run: maturin develop --release
+
+      - name: Run benchmark suite
+        env:
+          SKIP_MATURIN: "1"
+        run: ./scripts/run_all_benchmarks.sh
+
+      - name: Validate benchmark results
+        run: python scripts/validate_benchmark_results.py --results-dir benchmarks/results/latest --slack 0.05 --absolute-slack-ms 0.05 --allow-missing-baseline
+
+      - name: Archive nightly benchmark artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-benchmarks
+          path: |
+            benchmarks/results/latest/**
+            benchmarks/results/*.csv
+            benchmarks/results/*.jsonl
+          if-no-files-found: warn
+

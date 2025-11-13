@@ -11,6 +11,7 @@ import os
 import statistics
 import sys
 import time
+from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
 try:
@@ -415,6 +416,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         json_output.append(result)
 
+    try:
+        raptors_threading = raptors_mod.threading_info()  # type: ignore[attr-defined]
+    except Exception:
+        raptors_threading = None
+
     metadata = {
         "numpy_version": np.__version__,
         "numpy_config": numpy_metadata,
@@ -425,13 +431,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             "RAPTORS_SIMD": os.environ.get("RAPTORS_SIMD"),
         },
         "timestamp": time.time(),
+        "raptors_threading": raptors_threading,
+        "raptors_simd_enabled": getattr(raptors_mod, "simd_enabled", lambda: None)(),
     }
 
     if args.output_json:
+        output_path = Path(args.output_json)
         payload = {"metadata": metadata, "cases": json_output}
-        with open(args.output_json, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, default=str)
-        print(f"\nWrote JSON results to {args.output_json}")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, indent=2, default=str))
+        print(f"\nWrote JSON results to {output_path}")
+
+        metadata_path = output_path.with_suffix(".metadata.json")
+        metadata_path.write_text(json.dumps(metadata, indent=2, default=str))
+        print(f"Wrote NumPy/dispatch metadata to {metadata_path}")
 
     if args.validate_json:
         with open(args.validate_json, "r", encoding="utf-8") as handle:

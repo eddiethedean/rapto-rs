@@ -1,9 +1,12 @@
 #![allow(dead_code)]
 
-#[cfg(target_arch = "x86_64")]
 use std::sync::OnceLock;
 
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use self::dispatch::{Candidate, DispatchResult, DispatchTable, SimdLevel};
+
 mod cpu;
+pub mod dispatch;
 
 pub use cpu::capabilities;
 pub type SimdCapabilities = cpu::SimdCapabilities;
@@ -12,16 +15,146 @@ pub type SimdCapabilities = cpu::SimdCapabilities;
 type ScaleKernelF32 = unsafe fn(&[f32], f32, &mut [f32]);
 
 #[cfg(target_arch = "x86_64")]
-static SCALE_F32_KERNEL: OnceLock<Option<ScaleKernelF32>> = OnceLock::new();
+type ScaleKernelF64 = unsafe fn(&[f64], f64, &mut [f64]);
 
 #[cfg(target_arch = "x86_64")]
-fn select_scale_f32_kernel() -> Option<ScaleKernelF32> {
-    if cpu::capabilities().avx2 {
-        Some(x86::scale_same_shape_f32)
-    } else {
-        None
+type AddKernelF64 = unsafe fn(&[f64], &[f64], &mut [f64]);
+
+#[cfg(target_arch = "x86_64")]
+type AddKernelF32 = unsafe fn(&[f32], &[f32], &mut [f32]);
+
+#[cfg(target_arch = "aarch64")]
+type ScaleKernelF32 = unsafe fn(&[f32], f32, &mut [f32]);
+
+#[cfg(target_arch = "aarch64")]
+type ScaleKernelF64 = unsafe fn(&[f64], f64, &mut [f64]);
+
+#[cfg(target_arch = "aarch64")]
+type AddKernelF64 = unsafe fn(&[f64], &[f64], &mut [f64]);
+
+#[cfg(target_arch = "aarch64")]
+type AddKernelF32 = unsafe fn(&[f32], &[f32], &mut [f32]);
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[inline]
+unsafe fn scalar_scale_same_shape_f32(input: &[f32], factor: f32, out: &mut [f32]) {
+    for (dst, &value) in out.iter_mut().zip(input.iter()) {
+        *dst = value * factor;
     }
 }
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[inline]
+unsafe fn scalar_scale_same_shape_f64(input: &[f64], factor: f64, out: &mut [f64]) {
+    for (dst, &value) in out.iter_mut().zip(input.iter()) {
+        *dst = value * factor;
+    }
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[inline]
+unsafe fn scalar_add_same_shape_f32(lhs: &[f32], rhs: &[f32], out: &mut [f32]) {
+    for ((dst, &l), &r) in out.iter_mut().zip(lhs.iter()).zip(rhs.iter()) {
+        *dst = l + r;
+    }
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[inline]
+unsafe fn scalar_add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) {
+    for ((dst, &l), &r) in out.iter_mut().zip(lhs.iter()).zip(rhs.iter()) {
+        *dst = l + r;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+const SCALE_F32_DISPATCH: DispatchTable<ScaleKernelF32> = DispatchTable::new(
+    "scale_same_shape_f32",
+    scalar_scale_same_shape_f32,
+    &[
+        Candidate::new(SimdLevel::Avx512, x86::avx512::scale_same_shape_f32),
+        Candidate::new(SimdLevel::Avx2, x86::scale_same_shape_f32),
+    ],
+);
+
+#[cfg(target_arch = "x86_64")]
+const SCALE_F64_DISPATCH: DispatchTable<ScaleKernelF64> = DispatchTable::new(
+    "scale_same_shape_f64",
+    scalar_scale_same_shape_f64,
+    &[
+        Candidate::new(SimdLevel::Avx512, x86::avx512::scale_same_shape_f64),
+        Candidate::new(SimdLevel::Avx2, x86::scale_same_shape_f64),
+    ],
+);
+
+#[cfg(target_arch = "x86_64")]
+const ADD_F64_DISPATCH: DispatchTable<AddKernelF64> = DispatchTable::new(
+    "add_same_shape_f64",
+    scalar_add_same_shape_f64,
+    &[
+        Candidate::new(SimdLevel::Avx512, x86::avx512::add_same_shape_f64),
+        Candidate::new(SimdLevel::Avx2, x86::add_same_shape_f64),
+    ],
+);
+
+#[cfg(target_arch = "x86_64")]
+const ADD_F32_DISPATCH: DispatchTable<AddKernelF32> = DispatchTable::new(
+    "add_same_shape_f32",
+    scalar_add_same_shape_f32,
+    &[Candidate::new(SimdLevel::Avx2, x86::add_same_shape_f32)],
+);
+
+#[cfg(target_arch = "x86_64")]
+static SCALE_F32_SELECTION: OnceLock<DispatchResult<ScaleKernelF32>> = OnceLock::new();
+
+#[cfg(target_arch = "x86_64")]
+static SCALE_F64_SELECTION: OnceLock<DispatchResult<ScaleKernelF64>> = OnceLock::new();
+
+#[cfg(target_arch = "x86_64")]
+static ADD_F64_SELECTION: OnceLock<DispatchResult<AddKernelF64>> = OnceLock::new();
+
+#[cfg(target_arch = "x86_64")]
+static ADD_F32_SELECTION: OnceLock<DispatchResult<AddKernelF32>> = OnceLock::new();
+
+#[cfg(target_arch = "aarch64")]
+const SCALE_F32_DISPATCH: DispatchTable<ScaleKernelF32> = DispatchTable::new(
+    "scale_same_shape_f32",
+    scalar_scale_same_shape_f32,
+    &[Candidate::new(SimdLevel::Neon, neon::scale_same_shape_f32)],
+);
+
+#[cfg(target_arch = "aarch64")]
+const SCALE_F64_DISPATCH: DispatchTable<ScaleKernelF64> = DispatchTable::new(
+    "scale_same_shape_f64",
+    scalar_scale_same_shape_f64,
+    &[Candidate::new(SimdLevel::Neon, neon::scale_same_shape_f64)],
+);
+
+#[cfg(target_arch = "aarch64")]
+const ADD_F64_DISPATCH: DispatchTable<AddKernelF64> = DispatchTable::new(
+    "add_same_shape_f64",
+    scalar_add_same_shape_f64,
+    &[Candidate::new(SimdLevel::Neon, neon::add_same_shape_f64)],
+);
+
+#[cfg(target_arch = "aarch64")]
+const ADD_F32_DISPATCH: DispatchTable<AddKernelF32> = DispatchTable::new(
+    "add_same_shape_f32",
+    scalar_add_same_shape_f32,
+    &[Candidate::new(SimdLevel::Neon, neon::add_same_shape_f32)],
+);
+
+#[cfg(target_arch = "aarch64")]
+static SCALE_F32_SELECTION: OnceLock<DispatchResult<ScaleKernelF32>> = OnceLock::new();
+
+#[cfg(target_arch = "aarch64")]
+static SCALE_F64_SELECTION: OnceLock<DispatchResult<ScaleKernelF64>> = OnceLock::new();
+
+#[cfg(target_arch = "aarch64")]
+static ADD_F64_SELECTION: OnceLock<DispatchResult<AddKernelF64>> = OnceLock::new();
+
+#[cfg(target_arch = "aarch64")]
+static ADD_F32_SELECTION: OnceLock<DispatchResult<AddKernelF32>> = OnceLock::new();
 
 #[cfg(target_arch = "x86_64")]
 pub fn reduce_sum_f64(input: &[f64], accumulators: usize) -> Option<f64> {
@@ -302,19 +435,12 @@ pub fn add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) -> bool {
     if lhs.len() != rhs.len() || lhs.len() != out.len() {
         return false;
     }
-    if cpu::capabilities().avx512 {
-        unsafe {
-            x86::avx512::add_same_shape_f64(lhs, rhs, out);
-        }
-        return true;
+    let selection = ADD_F64_SELECTION
+        .get_or_init(|| ADD_F64_DISPATCH.resolve(dispatch::global_mode(), cpu::capabilities()));
+    unsafe {
+        (selection.func)(lhs, rhs, out);
     }
-    if cpu::capabilities().avx2 {
-        unsafe {
-            x86::add_same_shape_f64(lhs, rhs, out);
-        }
-        return true;
-    }
-    false
+    !matches!(selection.level, SimdLevel::Scalar)
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -322,10 +448,12 @@ pub fn add_same_shape_f64(lhs: &[f64], rhs: &[f64], out: &mut [f64]) -> bool {
     if lhs.len() != rhs.len() || lhs.len() != out.len() {
         return false;
     }
+    let selection = ADD_F64_SELECTION
+        .get_or_init(|| ADD_F64_DISPATCH.resolve(dispatch::global_mode(), cpu::capabilities()));
     unsafe {
-        neon::add_same_shape_f64(lhs, rhs, out);
+        (selection.func)(lhs, rhs, out);
     }
-    true
+    !matches!(selection.level, SimdLevel::Scalar)
 }
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -339,13 +467,12 @@ pub fn add_same_shape_f32(lhs: &[f32], rhs: &[f32], out: &mut [f32]) -> bool {
     if lhs.len() != rhs.len() || lhs.len() != out.len() {
         return false;
     }
-    if cpu::capabilities().avx2 {
-        unsafe {
-            x86::add_same_shape_f32(lhs, rhs, out);
-        }
-        return true;
+    let selection = ADD_F32_SELECTION
+        .get_or_init(|| ADD_F32_DISPATCH.resolve(dispatch::global_mode(), cpu::capabilities()));
+    unsafe {
+        (selection.func)(lhs, rhs, out);
     }
-    false
+    !matches!(selection.level, SimdLevel::Scalar)
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -353,10 +480,12 @@ pub fn add_same_shape_f32(lhs: &[f32], rhs: &[f32], out: &mut [f32]) -> bool {
     if lhs.len() != rhs.len() || lhs.len() != out.len() {
         return false;
     }
+    let selection = ADD_F32_SELECTION
+        .get_or_init(|| ADD_F32_DISPATCH.resolve(dispatch::global_mode(), cpu::capabilities()));
     unsafe {
-        neon::add_same_shape_f32(lhs, rhs, out);
+        (selection.func)(lhs, rhs, out);
     }
-    true
+    !matches!(selection.level, SimdLevel::Scalar)
 }
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -438,19 +567,12 @@ pub fn scale_same_shape_f64(input: &[f64], factor: f64, out: &mut [f64]) -> bool
     if input.len() != out.len() {
         return false;
     }
-    if cpu::capabilities().avx512 {
-        unsafe {
-            x86::avx512::scale_same_shape_f64(input, factor, out);
-        }
-        return true;
+    let selection = SCALE_F64_SELECTION
+        .get_or_init(|| SCALE_F64_DISPATCH.resolve(dispatch::global_mode(), cpu::capabilities()));
+    unsafe {
+        (selection.func)(input, factor, out);
     }
-    if cpu::capabilities().avx2 {
-        unsafe {
-            x86::scale_same_shape_f64(input, factor, out);
-        }
-        return true;
-    }
-    false
+    !matches!(selection.level, SimdLevel::Scalar)
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -458,10 +580,12 @@ pub fn scale_same_shape_f64(input: &[f64], factor: f64, out: &mut [f64]) -> bool
     if input.len() != out.len() {
         return false;
     }
+    let selection = SCALE_F64_SELECTION
+        .get_or_init(|| SCALE_F64_DISPATCH.resolve(dispatch::global_mode(), cpu::capabilities()));
     unsafe {
-        neon::scale_same_shape_f64(input, factor, out);
+        (selection.func)(input, factor, out);
     }
-    true
+    !matches!(selection.level, SimdLevel::Scalar)
 }
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -475,15 +599,12 @@ pub fn scale_same_shape_f32(input: &[f32], factor: f32, out: &mut [f32]) -> bool
     if input.len() != out.len() {
         return false;
     }
-    match *SCALE_F32_KERNEL.get_or_init(select_scale_f32_kernel) {
-        Some(kernel) => {
-            unsafe {
-                kernel(input, factor, out);
-            }
-            true
-        }
-        None => false,
+    let selection = SCALE_F32_SELECTION
+        .get_or_init(|| SCALE_F32_DISPATCH.resolve(dispatch::global_mode(), cpu::capabilities()));
+    unsafe {
+        (selection.func)(input, factor, out);
     }
+    !matches!(selection.level, SimdLevel::Scalar)
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -491,10 +612,12 @@ pub fn scale_same_shape_f32(input: &[f32], factor: f32, out: &mut [f32]) -> bool
     if input.len() != out.len() {
         return false;
     }
+    let selection = SCALE_F32_SELECTION
+        .get_or_init(|| SCALE_F32_DISPATCH.resolve(dispatch::global_mode(), cpu::capabilities()));
     unsafe {
-        neon::scale_same_shape_f32(input, factor, out);
+        (selection.func)(input, factor, out);
     }
-    true
+    !matches!(selection.level, SimdLevel::Scalar)
 }
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]

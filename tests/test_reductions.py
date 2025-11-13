@@ -84,3 +84,50 @@ def test_float64_axis0_small_matrix_stack_fast_path():
     expected = arr.mean(axis=0)
     result = rap.mean_axis(0).to_numpy()
     np.testing.assert_allclose(result, expected, rtol=1e-10, atol=1e-12)
+
+
+@pytest.mark.parametrize(
+    "dtype,rtol,atol",
+    [("float64", 1e-10, 1e-12), ("float32", 1e-5, 1e-6)],
+)
+@pytest.mark.parametrize("layout", ["transpose", "fortran", "row_slice"])
+@pytest.mark.parametrize("axis", [0, 1])
+def test_mean_axis_strided_layouts(dtype, rtol, atol, layout, axis):
+    rng = np.random.default_rng(101)
+    base = rng.standard_normal((48, 32)).astype(dtype)
+    if layout == "transpose":
+        arr = base.T
+    elif layout == "fortran":
+        arr = np.asfortranarray(base)
+    else:
+        arr = base[::2, :]
+    rap = raptors.from_numpy(arr)
+    expected = arr.mean(axis=axis)
+    result = rap.mean_axis(axis).to_numpy()
+    np.testing.assert_allclose(result, expected, rtol=rtol, atol=atol)
+
+
+@pytest.mark.parametrize("layout", ["transpose", "row_slice"])
+@pytest.mark.parametrize("dtype", [np.float64, np.float32])
+def test_broadcast_add_strided_inputs(layout, dtype):
+    rng = np.random.default_rng(77)
+    base = rng.standard_normal((32, 24)).astype(dtype)
+    if layout == "transpose":
+        arr = base.T
+    else:
+        arr = base[::2, :]
+    col = rng.standard_normal(arr.shape[0]).astype(dtype)
+    row = rng.standard_normal(arr.shape[1]).astype(dtype)
+    rap_arr = raptors.from_numpy(arr)
+    rap_col = raptors.from_numpy(col)
+    rap_row = raptors.from_numpy(row)
+    expected_col = arr + col[:, None]
+    result_col = raptors.broadcast_add(rap_arr, rap_col).to_numpy()
+    if dtype == np.float64:
+        rtol, atol = 1e-10, 1e-12
+    else:
+        rtol, atol = 1e-5, 1e-6
+    np.testing.assert_allclose(result_col, expected_col, rtol=rtol, atol=atol)
+    expected_row = arr + row
+    result_row = raptors.broadcast_add(rap_arr, rap_row).to_numpy()
+    np.testing.assert_allclose(result_row, expected_row, rtol=rtol, atol=atol)

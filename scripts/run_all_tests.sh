@@ -47,18 +47,22 @@ if ! env -u CONDA_PREFIX VIRTUAL_ENV="${VENV_DIR}" "${VENV_PYTHON}" -m pip --ver
   exit 1
 fi
 
-REQUIRED_PACKAGES=(maturin pytest numpy)
-MISSING_PACKAGES=()
+if [[ "${SKIP_TOOLS_INSTALL:-0}" != "1" ]]; then
+  REQUIRED_PACKAGES=(maturin pytest numpy)
+  MISSING_PACKAGES=()
 
-for package in "${REQUIRED_PACKAGES[@]}"; do
-  if ! env -u CONDA_PREFIX VIRTUAL_ENV="${VENV_DIR}" "${VENV_PYTHON}" -m pip show "${package}" >/dev/null 2>&1; then
-    MISSING_PACKAGES+=("${package}")
+  for package in "${REQUIRED_PACKAGES[@]}"; do
+    if ! env -u CONDA_PREFIX VIRTUAL_ENV="${VENV_DIR}" "${VENV_PYTHON}" -m pip show "${package}" >/dev/null 2>&1; then
+      MISSING_PACKAGES+=("${package}")
+    fi
+  done
+
+  if [[ "${#MISSING_PACKAGES[@]}" -gt 0 ]]; then
+    echo "==> Installing tooling (${MISSING_PACKAGES[*]}) into ${VENV_DIR}"
+    env -u CONDA_PREFIX VIRTUAL_ENV="${VENV_DIR}" "${VENV_PYTHON}" -m pip install --upgrade pip "${MISSING_PACKAGES[@]}"
   fi
-done
-
-if [[ "${#MISSING_PACKAGES[@]}" -gt 0 ]]; then
-  echo "==> Installing tooling (${MISSING_PACKAGES[*]}) into ${VENV_DIR}"
-  env -u CONDA_PREFIX VIRTUAL_ENV="${VENV_DIR}" "${VENV_PYTHON}" -m pip install --upgrade pip "${MISSING_PACKAGES[@]}"
+else
+  echo "==> Skipping tooling installation (SKIP_TOOLS_INSTALL=1)"
 fi
 
 if [[ "${SKIP_MATURIN:-0}" != "1" ]]; then

@@ -23,7 +23,6 @@ pub trait BlasProvider: Send + Sync {
         let _ = (len, alpha, data);
         false
     }
-
 }
 
 struct NoBlas;
@@ -122,7 +121,6 @@ impl BlasProvider for AccelerateBlas {
         }
         true
     }
-
 }
 
 static BACKEND: OnceLock<Box<dyn BlasProvider>> = OnceLock::new();
@@ -144,7 +142,7 @@ pub fn scale_override() -> Option<bool> {
 }
 
 pub fn scale_enabled() -> bool {
-    scale_override().unwrap_or(false)
+    scale_override().unwrap_or_else(|| backend_name() != "none")
 }
 
 pub fn axis0_enabled() -> bool {
@@ -318,7 +316,6 @@ impl BlasProvider for OpenBlasBackend {
         }
         true
     }
-
 }
 
 #[cfg(not(all(feature = "openblas", not(target_os = "macos"))))]

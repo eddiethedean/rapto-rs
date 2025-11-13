@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from dataclasses import dataclass
 from typing import List, Sequence
 
 
@@ -139,6 +140,28 @@ def run_perf(
     print(f"perf flamegraph written to {flamegraph_output}")
 
 
+def run_cprofile(cmd: Sequence[str], output: Path, env: dict[str, str]) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    cmd_list = list(cmd)
+    try:
+        if cmd_list and Path(cmd_list[0]).resolve() == Path(sys.executable).resolve():
+            cmd_list = cmd_list[1:]
+    except FileNotFoundError:
+        # Fall back to raw command if resolution fails (e.g., executable missing)
+        pass
+    cprofile_cmd = [
+        sys.executable,
+        "-m",
+        "cProfile",
+        "-o",
+        str(output),
+        *cmd_list,
+    ]
+    print(f"[cProfile] running: {' '.join(shlex.quote(arg) for arg in cprofile_cmd)}")
+    subprocess.run(cprofile_cmd, check=True, env=env)
+    print(f"cProfile stats written to {output}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -149,9 +172,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--tool",
-        choices=["py-spy", "perf"],
+        choices=["py-spy", "perf", "cprofile"],
         default="py-spy",
         help="Profiler to invoke (default: py-spy).",
+    )
+    parser.add_argument(
+        "--matrix",
+        action="store_true",
+        help=(
+            "Run a dispatch matrix covering threaded/single-threaded and SIMD forced/disabled "
+            "combinations (writes outputs per scenario)."
+        ),
     )
     parser.add_argument(
         "--command",
@@ -202,47 +233,131 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Path to the inferno-flamegraph binary (optional).",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Directory to write profiler outputs when --matrix is used.",
+    )
     return parser.parse_args()
 
 
-def build_command(args: argparse.Namespace) -> List[str]:
+def build_command(args: argparse.Namespace, simd_mode: str) -> List[str]:
     if args.operation == "custom":
         if not args.command:
             raise SystemExit("Provide --command when --operation custom is selected.")
         return list(args.command)
     if args.operation == "axis0":
-        return default_axis0_command(args.simd_mode, args.warmup, args.repeats)
+        return default_axis0_command(simd_mode, args.warmup, args.repeats)
     if args.operation == "scale":
-        return default_scale_command(args.simd_mode, args.warmup, args.repeats)
+        return default_scale_command(simd_mode, args.warmup, args.repeats)
     raise SystemExit(f"Unsupported operation {args.operation!r}")
+
+
+@dataclass
+class Scenario:
+    label: str
+    threads: int | None
+    simd_mode: str
+
+
+def scenario_matrix(args: argparse.Namespace) -> List[Scenario]:
+    default_threads = args.threads or int(os.environ.get("RAPTORS_THREADS", "10"))
+    return [
+        Scenario("threads", default_threads, "force"),
+        Scenario("threads", default_threads, "disable"),
+        Scenario("single", 1, "force"),
+        Scenario("single", 1, "disable"),
+    ]
+
+
+def resolve_output(
+    base_dir: Path,
+    operation: str,
+    tool: str,
+    scenario: Scenario,
+    explicit: Path | None = None,
+) -> tuple[Path, Path | None]:
+    if tool == "py-spy":
+        suffix = "svg"
+    elif tool == "perf":
+        suffix = "data"
+    else:
+        suffix = "prof"
+    threads_part = "tNA" if scenario.threads is None else f"t{scenario.threads}"
+    stem = f"{operation}-{scenario.label}-{threads_part}-simd-{scenario.simd_mode}"
+    output = (explicit or base_dir / f"{stem}.{suffix}").resolve()
+    flamegraph = None
+    if tool == "perf":
+        flamegraph = output.with_suffix(".svg")
+    return output, flamegraph
 
 
 def main() -> int:
     args = parse_args()
-    cmd = build_command(args)
-
-    env = os.environ.copy()
-    if args.threads is not None:
-        env["RAPTORS_THREADS"] = str(args.threads)
-
     default_dir = ROOT / "benchmarks" / "profiles"
     default_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.tool == "py-spy":
-        output = args.output or default_dir / f"{args.operation}-{args.simd_mode}.svg"
-        run_pyspy(cmd, output, env)
+    scenarios: List[Scenario]
+    if args.matrix:
+        scenarios = scenario_matrix(args)
     else:
-        data_output = args.output or default_dir / f"{args.operation}-{args.simd_mode}.data"
-        flamegraph_output = args.flamegraph_output
-        perf_flamegraph = args.perf_flamegraph
-        run_perf(
-            cmd,
-            data_output,
-            flamegraph_output,
-            env,
-            args.perf_frequency,
-            perf_flamegraph,
+        scenarios = [
+            Scenario(
+                "custom",
+                args.threads,
+                args.simd_mode,
+            )
+        ]
+
+    for scenario in scenarios:
+        cmd = build_command(args, scenario.simd_mode)
+        env = os.environ.copy()
+        if scenario.threads is not None:
+            env["RAPTORS_THREADS"] = str(scenario.threads)
+        python_pkg_dir = str(ROOT / "python")
+        env["PYTHONPATH"] = (
+            f"{python_pkg_dir}{os.pathsep}{env['PYTHONPATH']}"
+            if "PYTHONPATH" in env and env["PYTHONPATH"]
+            else python_pkg_dir
         )
+        label_desc = (
+            f"{args.operation} simd={scenario.simd_mode} "
+            f"threads={scenario.threads if scenario.threads is not None else env.get('RAPTORS_THREADS', 'inherit')}"
+        )
+        print(f"[profile] Running {label_desc} with {args.tool}")
+
+        base_dir = args.output_dir or default_dir
+        if args.matrix:
+            output, flamegraph_output = resolve_output(
+                base_dir, args.operation, args.tool, scenario
+            )
+        else:
+            if args.tool == "py-spy":
+                suffix = "svg"
+            elif args.tool == "perf":
+                suffix = "data"
+            else:
+                suffix = "prof"
+            stem = f"{args.operation}-{scenario.simd_mode}"
+            output = (args.output or base_dir / f"{stem}.{suffix}").resolve()
+            flamegraph_output = args.flamegraph_output if args.tool == "perf" else None
+
+        if args.tool == "py-spy":
+            run_pyspy(cmd, output, env)
+        elif args.tool == "perf":
+            data_output = output
+            run_perf(
+                cmd,
+                data_output,
+                flamegraph_output,
+                env,
+                args.perf_frequency,
+                args.perf_flamegraph,
+            )
+        elif args.tool == "cprofile":
+            run_cprofile(cmd, output, env)
+        else:
+            raise SystemExit(f"Unsupported profiler tool '{args.tool}'")
     return 0
 
 

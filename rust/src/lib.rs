@@ -80,12 +80,11 @@ trait NumericElement:
 }
 
 fn simd_is_enabled() -> bool {
-    if let Ok(flag) = env::var("RAPTORS_SIMD") {
-        match flag.trim().to_ascii_lowercase().as_str() {
-            "0" | "false" | "off" => return false,
-            "1" | "true" | "on" => return true,
-            _ => {}
-        }
+    if matches!(
+        simd::dispatch::global_mode(),
+        simd::dispatch::SimdMode::Disable
+    ) {
+        return false;
     }
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
@@ -192,6 +191,7 @@ const SMALL_MATRIX_FAST_DIM: usize = 256;
 const SCALE_TINY_DIM: usize = 512;
 const SCALE_PAR_MIN_ELEMS: usize = 1 << 18;
 const SCALE_PAR_MIN_ELEMS_F64: usize = 1 << 18;
+const BROADCAST_ROW_TILING_MIN_ELEMS: usize = 1 << 18;
 const OPERATION_SCALE: &str = "scale";
 const OPERATION_BROADCAST_ROW: &str = "broadcast_row";
 const OPERATION_BROADCAST_COL: &str = "broadcast_col";
@@ -466,10 +466,7 @@ impl AdaptiveBucket {
         }
     }
 
-    fn median_from_map<K>(
-        map: &HashMap<K, VecDeque<f64>>,
-        key: K,
-    ) -> Option<f64>
+    fn median_from_map<K>(map: &HashMap<K, VecDeque<f64>>, key: K) -> Option<f64>
     where
         K: Eq + Hash + Copy,
     {
@@ -526,12 +523,7 @@ impl AdaptiveBucket {
         Self::median_from_map(&self.seq_throughput, dtype)
     }
 
-    fn percentile(
-        &self,
-        dtype: &'static str,
-        percentile: f64,
-        parallel: bool,
-    ) -> Option<f64> {
+    fn percentile(&self, dtype: &'static str, percentile: f64, parallel: bool) -> Option<f64> {
         if parallel {
             Self::percentile_from_map(&self.throughput, dtype, percentile)
         } else {
@@ -662,11 +654,7 @@ impl AdaptiveThreadingState {
             .operation_percentile(operation, dtype, parallel, percentile)
     }
 
-    fn recommend_cutover_mode(
-        &self,
-        dtype: &'static str,
-        mode: ThreadingMode,
-    ) -> Option<usize> {
+    fn recommend_cutover_mode(&self, dtype: &'static str, mode: ThreadingMode) -> Option<usize> {
         let median = self.median_mode(dtype, mode)?;
         if median <= 0.0 {
             return None;
@@ -852,13 +840,7 @@ impl AdaptiveThreadingState {
         parallel: bool,
         percentile: f64,
     ) -> Option<f64> {
-        self.operation_percentile_mode(
-            operation,
-            dtype,
-            parallel,
-            percentile,
-            ThreadingMode::Simd,
-        )
+        self.operation_percentile_mode(operation, dtype, parallel, percentile, ThreadingMode::Simd)
     }
 
     fn recommend_cutover(&self, dtype: &'static str) -> Option<usize> {
@@ -1123,17 +1105,13 @@ fn scale_parallel_policy(dtype: &'static str, mode: ThreadingMode) -> (usize, bo
     };
     let mut prefer_parallel = true;
     if let Ok(guard) = adaptive_state().lock() {
-        if let Some(recommended) =
-            guard.recommend_cutover_op_mode(OPERATION_SCALE, dtype, mode)
-        {
+        if let Some(recommended) = guard.recommend_cutover_op_mode(OPERATION_SCALE, dtype, mode) {
             cutover = cutover.max(recommended);
         } else if let Some(recommended) = guard.recommend_cutover_mode(dtype, mode) {
             cutover = cutover.max(recommended);
         }
-        let par_samples =
-            guard.operation_sample_count_mode(OPERATION_SCALE, dtype, true, mode);
-        let seq_samples =
-            guard.operation_sample_count_mode(OPERATION_SCALE, dtype, false, mode);
+        let par_samples = guard.operation_sample_count_mode(OPERATION_SCALE, dtype, true, mode);
+        let seq_samples = guard.operation_sample_count_mode(OPERATION_SCALE, dtype, false, mode);
         if seq_samples >= 6 && par_samples == 0 {
             prefer_parallel = false;
         }
@@ -1200,8 +1178,7 @@ fn scale_parallel_policy(dtype: &'static str, mode: ThreadingMode) -> (usize, bo
         } else if let (Some(par_median), Some(seq_median)) = (
             guard.median_mode(dtype, mode),
             guard.median_seq_mode(dtype, mode),
-        )
-        {
+        ) {
             if par_median <= seq_median * 1.05 {
                 prefer_parallel = false;
             }
@@ -1308,6 +1285,103 @@ fn accelerate_vsmul_f32(src: &[f32], factor: f32, dst: &mut [f32]) -> bool {
 #[inline]
 fn accelerate_vsmul_f32(src: &[f32], factor: f32, dst: &mut [f32]) -> bool {
     let _ = (src, factor, dst);
+    false
+}
+
+#[cfg(target_os = "macos")]
+#[inline]
+fn accelerate_vadd_f32(lhs: &[f32], rhs: &[f32], dst: &mut [f32]) -> bool {
+    if lhs.len() != rhs.len() || lhs.len() != dst.len() {
+        return false;
+    }
+    extern "C" {
+        fn vDSP_vadd(
+            __A: *const f32,
+            __IA: isize,
+            __B: *const f32,
+            __IB: isize,
+            __C: *mut f32,
+            __IC: isize,
+            __N: usize,
+        );
+    }
+    unsafe {
+        vDSP_vadd(
+            lhs.as_ptr(),
+            1,
+            rhs.as_ptr(),
+            1,
+            dst.as_mut_ptr(),
+            1,
+            lhs.len(),
+        );
+    }
+    true
+}
+
+#[cfg(not(target_os = "macos"))]
+#[inline]
+fn accelerate_vadd_f32(lhs: &[f32], rhs: &[f32], dst: &mut [f32]) -> bool {
+    let _ = (lhs, rhs, dst);
+    false
+}
+
+#[cfg(target_os = "macos")]
+#[inline]
+fn accelerate_vsadd_f32(src: &[f32], scalar: f32, dst: &mut [f32]) -> bool {
+    if src.len() != dst.len() {
+        return false;
+    }
+    extern "C" {
+        fn vDSP_vsadd(
+            __A: *const f32,
+            __IA: isize,
+            __B: *const f32,
+            __C: *mut f32,
+            __IC: isize,
+            __N: usize,
+        );
+    }
+    unsafe {
+        vDSP_vsadd(src.as_ptr(), 1, &scalar, dst.as_mut_ptr(), 1, src.len());
+    }
+    true
+}
+
+#[cfg(not(target_os = "macos"))]
+#[inline]
+fn accelerate_vsadd_f32(src: &[f32], scalar: f32, dst: &mut [f32]) -> bool {
+    let _ = (src, scalar, dst);
+    false
+}
+
+#[cfg(target_os = "macos")]
+#[inline]
+fn accelerate_vsadd_inplace_f32(dst: &mut [f32], scalar: f32) -> bool {
+    if dst.is_empty() {
+        return true;
+    }
+    extern "C" {
+        fn vDSP_vsadd(
+            __A: *const f32,
+            __IA: isize,
+            __B: *const f32,
+            __C: *mut f32,
+            __IC: isize,
+            __N: usize,
+        );
+    }
+    unsafe {
+        let ptr = dst.as_mut_ptr();
+        vDSP_vsadd(ptr, 1, &scalar, ptr, 1, dst.len());
+    }
+    true
+}
+
+#[cfg(not(target_os = "macos"))]
+#[inline]
+fn accelerate_vsadd_inplace_f32(dst: &mut [f32], scalar: f32) -> bool {
+    let _ = (dst, scalar);
     false
 }
 
@@ -1970,6 +2044,9 @@ where
             if simd::add_same_shape_f32(lhs, rhs, out) {
                 return Some(NumericArray::new_owned(data, self.shape.clone()));
             }
+            if accelerate_vadd_f32(lhs, rhs, out) {
+                return Some(NumericArray::new_owned(data, self.shape.clone()));
+            }
         }
         if try_parallel(len, || {
             use rayon::prelude::*;
@@ -2068,13 +2145,36 @@ where
                         let out = unsafe {
                             std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f32, total_len)
                         };
+                        if total_len >= BROADCAST_ROW_TILING_MIN_ELEMS {
+                            let start = Instant::now();
+                            let used = with_f32_scratch(total_len, |scratch| {
+                                for row in 0..rows {
+                                    let offset = row * cols;
+                                    scratch[offset..offset + cols].copy_from_slice(rhs);
+                                }
+                                accelerate_vadd_f32(lhs, &scratch[..], out)
+                            });
+                            if used {
+                                record_broadcast_event(
+                                    T::DTYPE_NAME,
+                                    rows,
+                                    cols,
+                                    start.elapsed(),
+                                    false,
+                                    BroadcastKind::Row,
+                                );
+                                return Some(NumericArray::new_owned(data, self.shape.clone()));
+                            }
+                        }
                         let start = Instant::now();
                         for (out_row, lhs_row) in out.chunks_mut(cols).zip(lhs.chunks(cols)) {
                             if !simd::add_same_shape_f32(lhs_row, rhs, out_row) {
-                                for (dst, (&l, &r)) in
-                                    out_row.iter_mut().zip(lhs_row.iter().zip(rhs.iter()))
-                                {
-                                    *dst = l + r;
+                                if !accelerate_vadd_f32(lhs_row, rhs, out_row) {
+                                    for (dst, (&l, &r)) in
+                                        out_row.iter_mut().zip(lhs_row.iter().zip(rhs.iter()))
+                                    {
+                                        *dst = l + r;
+                                    }
                                 }
                             }
                         }
@@ -2120,12 +2220,14 @@ where
                                             out_block.chunks_mut(cols).zip(lhs_block.chunks(cols))
                                         {
                                             if !simd::add_same_shape_f32(lhs_row, rhs, out_row) {
-                                                for ((dst, &l), &r) in out_row
-                                                    .iter_mut()
-                                                    .zip(lhs_row.iter())
-                                                    .zip(rhs.iter())
-                                                {
-                                                    *dst = l + r;
+                                                if !accelerate_vadd_f32(lhs_row, rhs, out_row) {
+                                                    for ((dst, &l), &r) in out_row
+                                                        .iter_mut()
+                                                        .zip(lhs_row.iter())
+                                                        .zip(rhs.iter())
+                                                    {
+                                                        *dst = l + r;
+                                                    }
                                                 }
                                             }
                                         }
@@ -2148,6 +2250,9 @@ where
                         let start = row * cols;
                         let end = start + cols;
                         if !simd::add_same_shape_f32(&lhs[start..end], rhs, &mut out[start..end]) {
+                            if accelerate_vadd_f32(&lhs[start..end], rhs, &mut out[start..end]) {
+                                continue;
+                            }
                             used = false;
                             break;
                         }
@@ -2193,9 +2298,44 @@ where
                     }
                 }
                 let start = Instant::now();
+                let rhs_f32_opt = if T::DTYPE_NAME == "float32" {
+                    Some(unsafe {
+                        std::slice::from_raw_parts(
+                            rhs_slice.as_ptr() as *const f32,
+                            rhs_slice.len(),
+                        )
+                    })
+                } else {
+                    None
+                };
                 for row in 0..rows {
                     let start = row * cols;
                     let end = start + cols;
+                    if let Some(rhs_f32) = rhs_f32_opt {
+                        let lhs_row_f32 = unsafe {
+                            std::slice::from_raw_parts(
+                                lhs_slice[start..end].as_ptr() as *const f32,
+                                end - start,
+                            )
+                        };
+                        let out_row_f32 = unsafe {
+                            std::slice::from_raw_parts_mut(
+                                data[start..end].as_mut_ptr() as *mut f32,
+                                end - start,
+                            )
+                        };
+                        if !simd::add_same_shape_f32(lhs_row_f32, rhs_f32, out_row_f32) {
+                            if !accelerate_vadd_f32(lhs_row_f32, rhs_f32, out_row_f32) {
+                                for (dst, (&l, &r)) in out_row_f32
+                                    .iter_mut()
+                                    .zip(lhs_row_f32.iter().zip(rhs_f32.iter()))
+                                {
+                                    *dst = l + r;
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     T::simd_add(&lhs_slice[start..end], rhs_slice, &mut data[start..end]);
                 }
                 record_broadcast_event(
@@ -2370,8 +2510,10 @@ where
                 for (row_idx, scalar) in rhs.iter().enumerate() {
                     let start = row_idx * cols;
                     let row_slice = &mut data[start..start + cols];
-                    for value in row_slice.iter_mut() {
-                        *value += *scalar;
+                    if !accelerate_vsadd_inplace_f32(row_slice, *scalar) {
+                        for value in row_slice.iter_mut() {
+                            *value += *scalar;
+                        }
                     }
                 }
                 let out_vec = unsafe {
@@ -2409,8 +2551,11 @@ where
                             .zip(rhs.par_iter().with_min_len(min_rows).copied())
                             .for_each(|((out_row, lhs_row), scalar)| {
                                 if !simd::add_row_scalar_f32(lhs_row, scalar, out_row) {
-                                    for (dst, &value) in out_row.iter_mut().zip(lhs_row.iter()) {
-                                        *dst = value + scalar;
+                                    if !accelerate_vsadd_f32(lhs_row, scalar, out_row) {
+                                        for (dst, &value) in out_row.iter_mut().zip(lhs_row.iter())
+                                        {
+                                            *dst = value + scalar;
+                                        }
                                     }
                                 }
                             });
@@ -2459,9 +2604,11 @@ where
                 let scalar = rhs[row_idx];
                 let out_row = &mut data[row_idx * cols..(row_idx + 1) * cols];
                 if !simd::add_row_scalar_f32(chunk, scalar, out_row) {
-                    out_row.copy_from_slice(chunk);
-                    for value in out_row.iter_mut() {
-                        *value += scalar;
+                    if !accelerate_vsadd_f32(chunk, scalar, out_row) {
+                        out_row.copy_from_slice(chunk);
+                        for value in out_row.iter_mut() {
+                            *value += scalar;
+                        }
                     }
                 }
             }
@@ -2501,8 +2648,23 @@ where
         if other.shape == [1] {
             let scalar = other.data_slice().get(0)?;
             let mut out = vec![T::zero(); self.data_len()];
-            for (dest, &value) in out.iter_mut().zip(self.data_slice().iter()) {
-                *dest = value + *scalar;
+            if T::DTYPE_NAME == "float32" {
+                let src = self.data_slice();
+                let src_f32 =
+                    unsafe { std::slice::from_raw_parts(src.as_ptr() as *const f32, src.len()) };
+                let out_f32 = unsafe {
+                    std::slice::from_raw_parts_mut(out.as_mut_ptr() as *mut f32, out.len())
+                };
+                let scalar_f32 = unsafe { *(scalar as *const T as *const f32) };
+                if !accelerate_vsadd_f32(src_f32, scalar_f32, out_f32) {
+                    for (dest, &value) in out_f32.iter_mut().zip(src_f32.iter()) {
+                        *dest = value + scalar_f32;
+                    }
+                }
+            } else {
+                for (dest, &value) in out.iter_mut().zip(self.data_slice().iter()) {
+                    *dest = value + *scalar;
+                }
             }
             return Some(NumericArray::new_owned(out, self.shape.clone()));
         }
@@ -2635,7 +2797,7 @@ where
             let ptr = view.as_ptr() as *const T;
             NumericArray::new_borrowed(ptr, len, owner, shape)
         } else {
-            let data = array.as_array().to_owned().into_raw_vec();
+            let data = array.as_array().iter().copied().collect::<Vec<T>>();
             Ok(Self::new_owned(data, shape))
         }
     }
@@ -2673,6 +2835,10 @@ where
     }
 
     fn add(&self, other: &NumericArray<T>) -> PyResult<NumericArray<T>> {
+        record_stride_event(
+            "broadcast_add",
+            self.is_contiguous() && other.is_contiguous(),
+        );
         if let Some(result) = self.try_simd_add_same_shape(other) {
             return Ok(result);
         }
@@ -2696,10 +2862,16 @@ where
         }
 
         let broadcast = BroadcastPair::new(self, other)?;
-        let data = broadcast
-            .rows()
-            .map(|result| result.map(|(a, b)| a + b))
-            .collect::<Result<Vec<_>, _>>()?;
+        let total = broadcast.total_elems();
+        let mut data = Vec::with_capacity(total);
+        unsafe {
+            data.set_len(total);
+        }
+        let left = self.data_slice();
+        let right = other.data_slice();
+        for (idx, (left_idx, right_idx)) in broadcast.stepper().enumerate() {
+            data[idx] = left[left_idx] + right[right_idx];
+        }
         Ok(NumericArray::new_owned(
             data,
             broadcast.output_shape.clone(),
@@ -2734,13 +2906,19 @@ where
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             let simd_enabled = simd_is_enabled();
+            if !simd_enabled {
+                out.copy_from_slice(input);
+                if blas::current_backend().dscal_f64(len, factor, out) {
+                    record_scale_event("float64", rows, cols, start.elapsed(), false);
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+            }
             let mode = if simd_enabled {
                 ThreadingMode::Simd
             } else {
                 ThreadingMode::Scalar
             };
-            let allow_scalar_blas = !simd_enabled && rows <= 512 && cols >= SCALE_PAR_MIN_ROWS;
-            if (simd_enabled || allow_scalar_blas) && rows <= 512 && cols >= SCALE_PAR_MIN_ROWS {
+            if rows <= 512 && cols >= SCALE_PAR_MIN_ROWS {
                 out.copy_from_slice(input);
                 if blas::current_backend().dscal_f64(len, factor, out) {
                     record_scale_event("float64", rows, cols, start.elapsed(), false);
@@ -2815,11 +2993,26 @@ where
             let factor_f32 = factor as f32;
             let simd_enabled = simd_is_enabled();
             let blas_override = blas::scale_override().unwrap_or(false);
-            let allow_scalar_blas = !simd_enabled
-                && len >= SCALE_BLAS_MIN_LEN
-                && rows >= SCALE_BLAS_MIN_ROWS
-                && cols >= SCALE_BLAS_MIN_COLS;
-            if (blas_override || allow_scalar_blas)
+            let blas_enabled = blas::scale_enabled();
+            if !simd_enabled {
+                if accelerate_vsmul_f32(input, factor_f32, out) {
+                    record_scale_event("float32", rows, cols, start.elapsed(), false);
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+
+                if (blas_override || blas_enabled)
+                    && len >= SCALE_BLAS_MIN_LEN
+                    && rows >= SCALE_BLAS_MIN_ROWS
+                    && cols >= SCALE_BLAS_MIN_COLS
+                {
+                    out.copy_from_slice(input);
+                    if blas::current_backend().sscal_f32(len, factor_f32, out) {
+                        record_scale_event("float32", rows, cols, start.elapsed(), false);
+                        return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                    }
+                }
+            }
+            if (blas_override || blas_enabled)
                 && len >= SCALE_BLAS_MIN_LEN
                 && rows >= SCALE_BLAS_MIN_ROWS
                 && cols >= SCALE_BLAS_MIN_COLS
@@ -2829,6 +3022,10 @@ where
                     record_scale_event("float32", rows, cols, start.elapsed(), false);
                     return Ok(NumericArray::new_owned(data, self.shape.clone()));
                 }
+            }
+            if simd_enabled && accelerate_vsmul_f32(input, factor_f32, out) {
+                record_scale_event("float32", rows, cols, start.elapsed(), false);
+                return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if len <= SMALL_DIRECT_THRESHOLD {
                 if !simd::scale_same_shape_f32(input, factor_f32, out) {
@@ -2863,7 +3060,8 @@ where
             } else {
                 ThreadingMode::Scalar
             };
-            let (mut parallel_cutover, prefer_parallel_raw) = scale_parallel_policy("float32", mode);
+            let (mut parallel_cutover, prefer_parallel_raw) =
+                scale_parallel_policy("float32", mode);
             if !simd_enabled {
                 parallel_cutover = parallel_cutover.max(SCALE_FORCE_PARALLEL_ELEMS << 1);
             }
@@ -2891,7 +3089,11 @@ where
                 && !large_square
                 && elements >= SCALE_FORCE_PARALLEL_ELEMS
                 && elements >= parallel_cutover;
-            let allow_parallel = (should_try_parallel || force_parallel)
+            let allow_parallel = simd_enabled
+                && (should_try_parallel || force_parallel)
+                && parallel_scale_f32(input, factor, out, rows, cols);
+            let allow_parallel = simd_enabled
+                && (should_try_parallel || force_parallel)
                 && parallel_scale_f32(input, factor, out, rows, cols);
             if allow_parallel {
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
@@ -3296,9 +3498,7 @@ fn reduce_axis0_f64(
     {
         if allow_parallel {
             if let Some(pool) = thread_pool() {
-                if let Some(mut sums) =
-                    reduce_axis0_parallel_matrix_f64(&pool, data, rows, cols)
-                {
+                if let Some(mut sums) = reduce_axis0_parallel_matrix_f64(&pool, data, rows, cols) {
                     if matches!(op, Reduction::Mean) {
                         let inv = 1.0 / rows as f64;
                         for value in &mut sums {
@@ -3841,13 +4041,12 @@ where
         })
     }
 
-    fn rows(&self) -> impl Iterator<Item = Result<(T, T), PyErr>> + '_ {
-        let total = self.output_shape.iter().product::<usize>();
-        (0..total).map(move |idx| {
-            let left_idx = map_index(&self.output_shape, &self.left_strides, idx)?;
-            let right_idx = map_index(&self.output_shape, &self.right_strides, idx)?;
-            Ok((self.left.get(left_idx), self.right.get(right_idx)))
-        })
+    fn stepper(&self) -> BroadcastStepper<'_> {
+        BroadcastStepper::new(&self.output_shape, &self.left_strides, &self.right_strides)
+    }
+
+    fn total_elems(&self) -> usize {
+        product(&self.output_shape)
     }
 }
 
@@ -3904,29 +4103,79 @@ fn broadcast_shapes(
     Ok((shape, left_strides, right_strides))
 }
 
-fn map_index(shape: &[usize], strides: &[usize], flat_index: usize) -> PyResult<usize> {
-    if shape.is_empty() {
-        return Ok(0);
-    }
-    let mut coords = vec![0usize; shape.len()];
-    let mut remainder = flat_index;
-    for i in (0..shape.len()).rev() {
-        let dim = shape[i];
-        if dim == 0 {
-            coords[i] = 0;
-            continue;
-        }
-        coords[i] = remainder % dim;
-        remainder /= dim;
-    }
+struct BroadcastStepper<'a> {
+    shape: &'a [usize],
+    left_strides: &'a [usize],
+    right_strides: &'a [usize],
+    left_backstrides: Vec<usize>,
+    right_backstrides: Vec<usize>,
+    coordinates: Vec<usize>,
+    left_index: usize,
+    right_index: usize,
+    remaining: usize,
+}
 
-    coords
-        .into_iter()
-        .zip(strides.iter())
-        .try_fold(0usize, |acc, (coord, stride)| {
-            acc.checked_add(coord * stride)
-                .ok_or_else(|| PyValueError::new_err("index overflow during broadcasting"))
-        })
+impl<'a> BroadcastStepper<'a> {
+    fn new(shape: &'a [usize], left_strides: &'a [usize], right_strides: &'a [usize]) -> Self {
+        let remaining = shape.iter().product::<usize>();
+        let coordinates = vec![0; shape.len()];
+        let left_backstrides = shape
+            .iter()
+            .zip(left_strides.iter())
+            .map(|(&dim, &stride)| stride.saturating_mul(dim.saturating_sub(1)))
+            .collect();
+        let right_backstrides = shape
+            .iter()
+            .zip(right_strides.iter())
+            .map(|(&dim, &stride)| stride.saturating_mul(dim.saturating_sub(1)))
+            .collect();
+        Self {
+            shape,
+            left_strides,
+            right_strides,
+            left_backstrides,
+            right_backstrides,
+            coordinates,
+            left_index: 0,
+            right_index: 0,
+            remaining,
+        }
+    }
+}
+
+impl<'a> Iterator for BroadcastStepper<'a> {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let current = (self.left_index, self.right_index);
+        self.remaining -= 1;
+        if self.remaining == 0 {
+            return Some(current);
+        }
+        if self.shape.is_empty() {
+            return Some(current);
+        }
+        for dim in (0..self.shape.len()).rev() {
+            let dim_len = self.shape[dim];
+            if dim_len == 0 {
+                continue;
+            }
+            self.coordinates[dim] += 1;
+            if self.coordinates[dim] < dim_len {
+                self.left_index = self.left_index.wrapping_add(self.left_strides[dim]);
+                self.right_index = self.right_index.wrapping_add(self.right_strides[dim]);
+                return Some(current);
+            } else {
+                self.coordinates[dim] = 0;
+                self.left_index = self.left_index.wrapping_sub(self.left_backstrides[dim]);
+                self.right_index = self.right_index.wrapping_sub(self.right_backstrides[dim]);
+            }
+        }
+        Some(current)
+    }
 }
 
 fn product(values: &[usize]) -> usize {
@@ -4357,6 +4606,12 @@ fn threading_info_py(py: Python<'_>) -> PyResult<PyObject> {
     simd_caps.set_item("neon", caps.neon)?;
     simd_caps.set_item("sve", caps.sve)?;
     info.set_item("simd_capabilities", simd_caps)?;
+
+    let dispatch_dict = PyDict::new_bound(py);
+    for (name, level) in simd::dispatch::selection_snapshot() {
+        dispatch_dict.set_item(name, level.label())?;
+    }
+    info.set_item("simd_dispatch", dispatch_dict)?;
 
     let stride_dict = PyDict::new_bound(py);
     for (kind, counter) in stride_snapshot() {

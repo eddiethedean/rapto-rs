@@ -88,7 +88,7 @@ Use `--layout transpose` or `--layout fortran` with `scripts/compare_numpy_rapto
 - `raptors.threading_info()["stride_counters"]` exposes contiguous vs strided dispatch counts per kernel, `["simd_capabilities"]` reports the detected AVX/NEON level, `["axis_tile_histogram"]` tracks column tiling widths, and `["blas_backend"]` reflects the active BLAS provider.
 - `python scripts/summarize_benchmarks.py results.json --sub-one --plot benchmarks/results/latest/slowdowns.svg` emits both CSV summaries and a bar chart of the slowest entries (optional matplotlib dependency).
 - `python scripts/profile_hotspots.py --operation axis0 --tool py-spy --threads 8` records a flamegraph for the axis-0 reducer; swap `--tool perf` and provide `--flamegraph-output` to collect Linux perf data and SVGs for audits.
-- `bash scripts/run_all_benchmarks.sh --output-dir benchmarks/results/latest` mirrors the nightly CI run and emits JSON, CSV, SVG, and an `index.html` dashboard summarizing the latest speedups.
+- `bash scripts/run_all_benchmarks.sh --output-dir benchmarks/results/latest` mirrors the nightly CI run and emits JSON, CSV, SVG, and an `index.html` dashboard summarizing the latest speedups. Validation is now enabled by default; only pass `--skip-validate` when intentionally collecting repro data for an in-progress regression.
 - `benchmarks/results/dev_scale/`, `benchmarks/results/dev_plan/`, and `benchmarks/results/scale1024/` contain the latest targeted JSON dumps collected while tuning scale, axis-0, and broadcast heuristics.
 
 ## Adaptive Threading Controls
