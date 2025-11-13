@@ -5,89 +5,8 @@
       512
     ],
     "dtype": "float32",
-    "operation": "sum",
-    "max_raptors_ms": 0.020
-  },
-  {
-    "shape": [
-      512,
-      512
-    ],
-    "dtype": "float32",
-    "operation": "mean",
-    "max_raptors_ms": 0.020
-  },
-  {
-    "shape": [
-      512,
-      512
-    ],
-    "dtype": "float32",
-    "operation": "mean_axis0",
-    "max_raptors_ms": 0.010
-  },
-  {
-    "shape": [
-      512,
-      512
-    ],
-    "dtype": "float32",
-    "operation": "mean_axis1",
-    "max_raptors_ms": 0.020
-  },
-  {
-    "shape": [
-      512,
-      512
-    ],
-    "dtype": "float32",
     "operation": "broadcast_add",
-    "max_raptors_ms": 0.035
-  },
-  {
-    "shape": [
-      512,
-      512
-    ],
-    "dtype": "float32",
-    "operation": "scale",
-    "max_raptors_ms": 0.015
-  },
-  {
-    "shape": [
-      1024,
-      1024
-    ],
-    "dtype": "float32",
-    "operation": "sum",
-    "max_raptors_ms": 0.320
-  },
-  {
-    "shape": [
-      1024,
-      1024
-    ],
-    "dtype": "float32",
-    "operation": "mean",
-    "max_raptors_ms": 0.080
-  },
-  {
-    "shape": [
-      1024,
-      1024
-    ],
-    "dtype": "float32",
-    "operation": "mean_axis0",
-    "max_raptors_ms": 0.025
-  },
-  {
-    "shape": [
-      1024,
-      1024
-    ],
-    "dtype": "float32",
-    "operation": "mean_axis1",
-    "max_raptors_ms": 0.085
+    "max_raptors_ms": 0.0231
   },
   {
     "shape": [
@@ -96,52 +15,7 @@
     ],
     "dtype": "float32",
     "operation": "broadcast_add",
-    "max_raptors_ms": 0.520
-  },
-  {
-    "shape": [
-      1024,
-      1024
-    ],
-    "dtype": "float32",
-    "operation": "scale",
-    "max_raptors_ms": 0.380
-  },
-  {
-    "shape": [
-      2048,
-      2048
-    ],
-    "dtype": "float32",
-    "operation": "sum",
-    "max_raptors_ms": 0.440
-  },
-  {
-    "shape": [
-      2048,
-      2048
-    ],
-    "dtype": "float32",
-    "operation": "mean",
-    "max_raptors_ms": 0.360
-  },
-  {
-    "shape": [
-      2048,
-      2048
-    ],
-    "dtype": "float32",
-    "operation": "mean_axis0",
-    "max_raptors_ms": 0.360
-  },
-  {
-    "shape": [
-      2048,
-      2048
-    ],
-    "dtype": "float32",
-    "operation": "mean_axis1",
-    "max_raptors_ms": 0.440
+    "max_raptors_ms": 0.2802
   },
   {
     "shape": [
@@ -150,7 +24,106 @@
     ],
     "dtype": "float32",
     "operation": "broadcast_add",
-    "max_raptors_ms": 0.800
+    "max_raptors_ms": 0.4638
+  },
+  {
+    "shape": [
+      512,
+      512
+    ],
+    "dtype": "float32",
+    "operation": "mean",
+    "max_raptors_ms": 0.0116
+  },
+  {
+    "shape": [
+      1024,
+      1024
+    ],
+    "dtype": "float32",
+    "operation": "mean",
+    "max_raptors_ms": 0.0515
+  },
+  {
+    "shape": [
+      2048,
+      2048
+    ],
+    "dtype": "float32",
+    "operation": "mean",
+    "max_raptors_ms": 0.207
+  },
+  {
+    "shape": [
+      512,
+      512
+    ],
+    "dtype": "float32",
+    "operation": "mean_axis0",
+    "max_raptors_ms": 0.0046
+  },
+  {
+    "shape": [
+      1024,
+      1024
+    ],
+    "dtype": "float32",
+    "operation": "mean_axis0",
+    "max_raptors_ms": 0.0118
+  },
+  {
+    "shape": [
+      2048,
+      2048
+    ],
+    "dtype": "float32",
+    "operation": "mean_axis0",
+    "max_raptors_ms": 0.2466
+  },
+  {
+    "shape": [
+      512,
+      512
+    ],
+    "dtype": "float32",
+    "operation": "mean_axis1",
+    "max_raptors_ms": 0.0119
+  },
+  {
+    "shape": [
+      1024,
+      1024
+    ],
+    "dtype": "float32",
+    "operation": "mean_axis1",
+    "max_raptors_ms": 0.0392
+  },
+  {
+    "shape": [
+      2048,
+      2048
+    ],
+    "dtype": "float32",
+    "operation": "mean_axis1",
+    "max_raptors_ms": 0.1725
+  },
+  {
+    "shape": [
+      512,
+      512
+    ],
+    "dtype": "float32",
+    "operation": "scale",
+    "max_raptors_ms": 0.0164
+  },
+  {
+    "shape": [
+      1024,
+      1024
+    ],
+    "dtype": "float32",
+    "operation": "scale",
+    "max_raptors_ms": 0.2706
   },
   {
     "shape": [
@@ -159,6 +132,33 @@
     ],
     "dtype": "float32",
     "operation": "scale",
-    "max_raptors_ms": 0.700
+    "max_raptors_ms": 0.6156
+  },
+  {
+    "shape": [
+      512,
+      512
+    ],
+    "dtype": "float32",
+    "operation": "sum",
+    "max_raptors_ms": 0.0126
+  },
+  {
+    "shape": [
+      1024,
+      1024
+    ],
+    "dtype": "float32",
+    "operation": "sum",
+    "max_raptors_ms": 0.0684
+  },
+  {
+    "shape": [
+      2048,
+      2048
+    ],
+    "dtype": "float32",
+    "operation": "sum",
+    "max_raptors_ms": 0.2128
   }
 ]

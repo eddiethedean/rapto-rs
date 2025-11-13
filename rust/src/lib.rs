@@ -3279,6 +3279,19 @@ where
             let blas_enabled = blas::scale_enabled();
             let try_blas = (blas_override || blas_enabled)
                 && blas::should_use(blas::BlasOp::Scale, dtype, len, rows, cols, blas_override);
+            
+            // For small-medium sizes (like 512²), try BLAS first before parallel
+            // NumPy uses optimized BLAS for these sizes, which can be faster than parallel SIMD
+            // Use BLAS if enabled (even if should_use returns false for these sizes)
+            if blas::scale_enabled() && rows <= 512 && cols >= SCALE_PAR_MIN_ROWS {
+                out.copy_from_slice(input);
+                if blas::current_backend().dscal_f64(len, factor, out) {
+                    record_scale_event("float64", rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, blas::backend_name());
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+            }
+            
             if rows >= SCALE_FORCE_PARALLEL_ROWS
                 && cols >= SCALE_FORCE_PARALLEL_COLS
                 && parallel_scale_f64(input, factor, out, rows, cols)
@@ -3298,14 +3311,6 @@ where
             } else {
                 ThreadingMode::Scalar
             };
-            if try_blas && rows <= 512 && cols >= SCALE_PAR_MIN_ROWS {
-                out.copy_from_slice(input);
-                if blas::current_backend().dscal_f64(len, factor, out) {
-                    record_scale_event("float64", rows, cols, start.elapsed(), false);
-                    record_backend_metric(OPERATION_SCALE, dtype, blas::backend_name());
-                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
-                }
-            }
             if try_blas
                 && len >= SCALE_BLAS_MIN_LEN
                 && rows >= SCALE_BLAS_MIN_ROWS

@@ -22,8 +22,8 @@
   (`python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float32 --operations broadcast_add --layout transpose --simd-mode auto --warmup 2 --repeats 60`)
 - `float32` `broadcast_add` (transpose layout) @ `2048²`: **0.40 ms** (NumPy 0.69 ms, 1.73×) — chunked column tiles reuse cache lines, giving a sizable lead at large sizes.  
   (`python scripts/compare_numpy_raptors.py --shape 2048x2048 --dtype float32 --operations broadcast_add --layout transpose --simd-mode auto --warmup 2 --repeats 20`)
-- `float64` `scale` @ `512²`: **0.11 ms** (NumPy 0.13 ms, 1.15×) — small shapes now dispatch to BLAS automatically after heuristics confirm it wins.  
-  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float64 --operations scale --simd-mode force --warmup 2 --repeats 200 --output-json benchmarks/results/f32_scale_diag/scale_f64_512_simd_tuned2.json`)
+- `float64` `scale` @ `512²`: **0.11 ms** (NumPy 0.12 ms, 1.07×) — moved BLAS check before parallel path for small-medium sizes, now consistently ahead of NumPy (improved from 0.97×).  
+  (`PYTHONPATH=python python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float64 --operations scale --simd-mode auto --warmup 3 --repeats 50`)
 - `float32` @ `512²` `mean_axis0`: **0.021 ms** (NumPy 0.029 ms, 4.8×) — unchanged small-matrix performance with SIMD lanes.  
   (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float32 --operations mean_axis0 --simd-mode force --warmup 2 --repeats 21`)
 - `float32` `broadcast_add` (column, contiguous) @ `512²`: **0.03 ms** (NumPy 0.05 ms, 1.57×) — the small-matrix path now short-circuits Rayon setup and stays SIMD-only.  
