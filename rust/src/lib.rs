@@ -12,6 +12,7 @@ use std::{
 };
 
 mod blas;
+mod metrics;
 mod reduce;
 mod simd;
 mod tiling;
@@ -326,6 +327,7 @@ impl Default for AdaptiveThreadingState {
 struct ThreadingSnapshot {
     thresholds: Vec<ThresholdEntry>,
     last_event: Option<ThreadingEvent>,
+    backend_usage: Vec<BackendSnapshot>,
 }
 
 #[derive(Clone, Default)]
@@ -368,6 +370,14 @@ static STRIDE_STATE: OnceLock<Mutex<HashMap<&'static str, StrideCounter>>> = Onc
 
 type TileHistogram = HashMap<usize, u64>;
 static AXIS_TILE_STATE: OnceLock<Mutex<HashMap<AxisKind, TileHistogram>>> = OnceLock::new();
+
+#[derive(Clone, Default)]
+struct BackendSnapshot {
+    operation: String,
+    dtype: String,
+    backend: String,
+    count: u64,
+}
 
 fn stride_state() -> &'static Mutex<HashMap<&'static str, StrideCounter>> {
     STRIDE_STATE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -419,6 +429,25 @@ fn axis_tile_snapshot() -> HashMap<AxisKind, TileHistogram> {
 
 fn adaptive_state() -> &'static Mutex<AdaptiveThreadingState> {
     ADAPTIVE_STATE.get_or_init(|| Mutex::new(AdaptiveThreadingState::default()))
+}
+
+fn backend_usage_snapshot() -> Vec<BackendSnapshot> {
+    metrics::snapshot()
+        .into_iter()
+        .map(|entry| BackendSnapshot {
+            operation: entry.operation.to_string(),
+            dtype: entry.dtype.to_string(),
+            backend: entry.backend.to_string(),
+            count: entry.count,
+        })
+        .collect()
+}
+
+fn record_backend_metric(operation: &'static str, dtype: &'static str, backend: &'static str) {
+    if operation.is_empty() || backend.is_empty() {
+        return;
+    }
+    metrics::record_backend(operation, dtype, backend);
 }
 
 impl AdaptiveBucket {
@@ -891,6 +920,7 @@ impl AdaptiveThreadingState {
         ThreadingSnapshot {
             thresholds,
             last_event: self.last_event.clone(),
+            backend_usage: backend_usage_snapshot(),
         }
     }
 }
@@ -1388,10 +1418,14 @@ fn accelerate_vsadd_inplace_f32(dst: &mut [f32], scalar: f32) -> bool {
 #[cfg(target_os = "macos")]
 #[inline]
 fn threading_snapshot() -> ThreadingSnapshot {
-    adaptive_state()
+    let mut snapshot = adaptive_state()
         .lock()
         .map(|guard| guard.snapshot())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if snapshot.backend_usage.is_empty() {
+        snapshot.backend_usage = backend_usage_snapshot();
+    }
+    snapshot
 }
 
 pub(crate) fn thread_pool() -> Option<&'static rayon::ThreadPool> {
@@ -1582,17 +1616,19 @@ fn parallel_scale_f64(
     if let Some(pool) = thread_pool() {
         let threads = pool.current_num_threads().max(1);
         let base_rows = ((rows + threads - 1) / threads).max(SCALE_PAR_MIN_ROWS);
+        let tile_rows = simd::row_tile_f32();
+        let prefetch_rows = simd::prefetched_rows();
         let max_rows = (SCALE_PAR_MAX_CHUNK_ELEMS / cols)
-            .max(SCALE_PAR_MIN_ROWS)
+            .max(tile_rows)
             .min(rows.max(1));
         let min_rows = (SCALE_PAR_MIN_CHUNK_ELEMS / cols)
-            .max(SCALE_PAR_MIN_ROWS)
+            .max(tile_rows.min(SCALE_PAR_MIN_ROWS))
+            .max(prefetch_rows)
             .min(rows.max(1));
         let mut chunk_rows = base_rows.clamp(min_rows, max_rows);
         if rows >= 2 * SCALE_PAR_MIN_ROWS {
-            let alignment = if rows >= 1024 { 128 } else { 64 };
-            if chunk_rows >= alignment {
-                let aligned = (chunk_rows / alignment).max(1) * alignment;
+            if chunk_rows >= tile_rows {
+                let aligned = (chunk_rows / tile_rows).max(1) * tile_rows;
                 if aligned <= max_rows {
                     chunk_rows = aligned.max(min_rows).min(max_rows).min(rows);
                 }
@@ -1614,6 +1650,7 @@ fn parallel_scale_f64(
                 });
         });
         record_scale_event("float64", rows, cols, start.elapsed(), true);
+        record_backend_metric(OPERATION_SCALE, "float64", "rayon_simd");
         true
     } else {
         false
@@ -1626,6 +1663,7 @@ fn parallel_scale_f32(
     out: &mut [f32],
     rows: usize,
     cols: usize,
+    simd_enabled: bool,
 ) -> bool {
     if rows <= 1 || cols == 0 || input.len() != out.len() || input.len() != rows * cols {
         return false;
@@ -1641,7 +1679,21 @@ fn parallel_scale_f32(
             .max(SCALE_PAR_MIN_ROWS)
             .min(rows.max(1));
         let mut chunk_rows = base_rows.clamp(min_rows, max_rows);
-        if rows >= 2 * SCALE_PAR_MIN_ROWS {
+        
+        // Optimize chunk sizing for 2048² to reduce threading overhead
+        // Use larger chunks to minimize thread coordination overhead
+        if rows == 2048 && cols == 2048 {
+            // For 2048², use fewer, larger chunks to reduce overhead
+            // Target 2-4 chunks instead of 8+ for better cache behavior
+            let target_chunks = threads.min(4);
+            chunk_rows = ((rows + target_chunks - 1) / target_chunks)
+                .max(min_rows)
+                .min(max_rows);
+            // Align to cache line boundary (128 rows = 512KB for float32 at 2048 cols)
+            let alignment = 128;
+            chunk_rows = ((chunk_rows + alignment - 1) / alignment) * alignment;
+            chunk_rows = chunk_rows.max(min_rows).min(max_rows).min(rows);
+        } else if rows >= 2 * SCALE_PAR_MIN_ROWS {
             let alignment = if rows >= 1024 { 128 } else { 64 };
             if chunk_rows >= alignment {
                 let aligned = (chunk_rows / alignment).max(1) * alignment;
@@ -1650,25 +1702,46 @@ fn parallel_scale_f32(
                 }
             }
         }
-        let min_rows = chunk_rows.max(1);
+        let tile_rows = simd::row_tile_f32().max(1);
+        if chunk_rows < tile_rows {
+            chunk_rows = tile_rows.min(max_rows).min(rows);
+        }
+        let target_elems = (input.len() + threads - 1) / threads;
+        let mut chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+        if chunk_elems > target_elems {
+            let desired_rows = (target_elems + cols - 1) / cols;
+            let aligned_rows = (desired_rows / tile_rows).max(1) * tile_rows;
+            chunk_rows = aligned_rows.clamp(min_rows, max_rows).min(rows);
+            chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+        }
         let start = Instant::now();
         pool.install(|| {
             use rayon::prelude::*;
-            let chunk_elems = cols.saturating_mul(min_rows).min(input.len());
+            let chunk_elems = chunk_elems.min(input.len());
             out.par_chunks_mut(chunk_elems)
                 .enumerate()
                 .for_each(|(chunk_index, dst_block)| {
                     let start = chunk_index * chunk_elems;
                     let end = start + dst_block.len();
                     let src_block = &input[start..end];
-                    if !simd::scale_same_shape_f32(src_block, factor_f32, dst_block) {
-                        if !accelerate_vsmul_f32(src_block, factor_f32, dst_block) {
-                            scale_block_scalar_f32(src_block, factor_f32, dst_block);
+                    if simd_enabled {
+                        if !simd::scale_same_shape_f32(src_block, factor_f32, dst_block) {
+                            if !accelerate_vsmul_f32(src_block, factor_f32, dst_block) {
+                                scale_block_scalar_f32(src_block, factor_f32, dst_block);
+                            }
                         }
+                    } else if !accelerate_vsmul_f32(src_block, factor_f32, dst_block) {
+                        scale_block_scalar_f32(src_block, factor_f32, dst_block);
                     }
                 });
         });
         record_scale_event("float32", rows, cols, start.elapsed(), true);
+        let backend = if simd_enabled {
+            "rayon_simd"
+        } else {
+            "rayon_scalar"
+        };
+        record_backend_metric(OPERATION_SCALE, "float32", backend);
         true
     } else {
         false
@@ -2124,6 +2197,73 @@ where
                         );
                         return Some(NumericArray::new_owned(data, self.shape.clone()));
                     }
+                    if allow_parallel && rows >= BROADCAST_PAR_MIN_ROWS {
+                        if let Some(pool) = thread_pool() {
+                            let start = Instant::now();
+                            let threads = pool.current_num_threads().max(1);
+                            let base_rows =
+                                ((rows + threads - 1) / threads).max(BROADCAST_PAR_MIN_ROWS);
+                            let max_rows = (SCALE_PAR_MAX_CHUNK_ELEMS / cols)
+                                .max(BROADCAST_PAR_MIN_ROWS)
+                                .min(rows.max(1));
+                            let min_rows = (SCALE_PAR_MIN_CHUNK_ELEMS / cols)
+                                .max(BROADCAST_PAR_MIN_ROWS)
+                                .min(rows.max(1));
+                            let mut chunk_rows = base_rows.clamp(min_rows, max_rows);
+                            if rows >= 2 * BROADCAST_PAR_MIN_ROWS {
+                                let alignment = if rows >= 1024 { 128 } else { 64 };
+                                if chunk_rows >= alignment {
+                                    let aligned = (chunk_rows / alignment).max(1) * alignment;
+                                    if aligned <= max_rows {
+                                        chunk_rows = aligned.max(min_rows).min(max_rows).min(rows);
+                                    }
+                                }
+                            }
+                            let tile_rows = simd::row_tile_f32().max(1);
+                            if chunk_rows < tile_rows {
+                                chunk_rows = tile_rows.min(max_rows).min(rows);
+                            }
+                            let target_elems = (lhs.len() + threads - 1) / threads;
+                            let mut chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+                            if chunk_elems > target_elems {
+                                let desired_rows = (target_elems + cols - 1) / cols;
+                                let aligned_rows = (desired_rows / tile_rows).max(1) * tile_rows;
+                                chunk_rows = aligned_rows.clamp(min_rows, max_rows).min(rows);
+                                chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+                            }
+                            let chunk_elems = chunk_elems.min(lhs.len());
+                            pool.install(|| {
+                                use rayon::prelude::*;
+                                out.par_chunks_mut(chunk_elems)
+                                    .zip(lhs.par_chunks(chunk_elems))
+                                    .for_each(|(out_block, lhs_block)| {
+                                        out_block
+                                            .chunks_mut(cols)
+                                            .zip(lhs_block.chunks(cols))
+                                            .for_each(|(out_row, lhs_row)| {
+                                                if !simd::add_same_shape_f64(lhs_row, rhs, out_row)
+                                                {
+                                                    out_row.copy_from_slice(lhs_row);
+                                                    for (dst, &val) in
+                                                        out_row.iter_mut().zip(rhs.iter())
+                                                    {
+                                                        *dst += val;
+                                                    }
+                                                }
+                                            });
+                                    });
+                            });
+                            record_broadcast_event(
+                                T::DTYPE_NAME,
+                                rows,
+                                cols,
+                                start.elapsed(),
+                                true,
+                                BroadcastKind::Row,
+                            );
+                            return Some(NumericArray::new_owned(data, self.shape.clone()));
+                        }
+                    }
                 } else if T::DTYPE_NAME == "float32" {
                     if rows <= 1024 {
                         let lhs = unsafe {
@@ -2207,30 +2347,62 @@ where
                     let out = unsafe {
                         std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f32, data.len())
                     };
-                    if allow_parallel && rows >= 1536 {
+                    if allow_parallel && rows >= BROADCAST_PAR_MIN_ROWS {
                         if let Some(pool) = thread_pool() {
                             let start = Instant::now();
-                            let row_block = 32usize;
+                            let threads = pool.current_num_threads().max(1);
+                            let base_rows =
+                                ((rows + threads - 1) / threads).max(BROADCAST_PAR_MIN_ROWS);
+                            let max_rows = (SCALE_PAR_MAX_CHUNK_ELEMS / cols)
+                                .max(BROADCAST_PAR_MIN_ROWS)
+                                .min(rows.max(1));
+                            let min_rows = (SCALE_PAR_MIN_CHUNK_ELEMS / cols)
+                                .max(BROADCAST_PAR_MIN_ROWS)
+                                .min(rows.max(1));
+                            let mut chunk_rows = base_rows.clamp(min_rows, max_rows);
+                            if rows >= 2 * BROADCAST_PAR_MIN_ROWS {
+                                let alignment = if rows >= 1024 { 128 } else { 64 };
+                                if chunk_rows >= alignment {
+                                    let aligned = (chunk_rows / alignment).max(1) * alignment;
+                                    if aligned <= max_rows {
+                                        chunk_rows = aligned.max(min_rows).min(max_rows).min(rows);
+                                    }
+                                }
+                            }
+                            let tile_rows = simd::row_tile_f32().max(1);
+                            if chunk_rows < tile_rows {
+                                chunk_rows = tile_rows.min(max_rows).min(rows);
+                            }
+                            let target_elems = (lhs.len() + threads - 1) / threads;
+                            let mut chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+                            if chunk_elems > target_elems {
+                                let desired_rows = (target_elems + cols - 1) / cols;
+                                let aligned_rows = (desired_rows / tile_rows).max(1) * tile_rows;
+                                chunk_rows = aligned_rows.clamp(min_rows, max_rows).min(rows);
+                                chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+                            }
+                            let chunk_elems = chunk_elems.min(lhs.len());
                             pool.install(|| {
                                 use rayon::prelude::*;
-                                out.par_chunks_mut(cols * row_block)
-                                    .zip(lhs.par_chunks(cols * row_block))
+                                out.par_chunks_mut(chunk_elems)
+                                    .zip(lhs.par_chunks(chunk_elems))
                                     .for_each(|(out_block, lhs_block)| {
-                                        for (out_row, lhs_row) in
-                                            out_block.chunks_mut(cols).zip(lhs_block.chunks(cols))
-                                        {
-                                            if !simd::add_same_shape_f32(lhs_row, rhs, out_row) {
-                                                if !accelerate_vadd_f32(lhs_row, rhs, out_row) {
-                                                    for ((dst, &l), &r) in out_row
-                                                        .iter_mut()
-                                                        .zip(lhs_row.iter())
-                                                        .zip(rhs.iter())
-                                                    {
-                                                        *dst = l + r;
+                                        out_block
+                                            .chunks_mut(cols)
+                                            .zip(lhs_block.chunks(cols))
+                                            .for_each(|(out_row, lhs_row)| {
+                                                if !simd::add_same_shape_f32(lhs_row, rhs, out_row)
+                                                {
+                                                    if !accelerate_vadd_f32(lhs_row, rhs, out_row) {
+                                                        out_row.copy_from_slice(lhs_row);
+                                                        for (dst, &val) in
+                                                            out_row.iter_mut().zip(rhs.iter())
+                                                        {
+                                                            *dst += val;
+                                                        }
                                                     }
                                                 }
-                                            }
-                                        }
+                                            });
                                     });
                             });
                             record_broadcast_event(
@@ -2414,18 +2586,56 @@ where
             if allow_parallel {
                 if let Some(pool) = thread_pool() {
                     let threads = pool.current_num_threads().max(1);
-                    let min_rows = ((rows + threads - 1) / threads).max(BROADCAST_PAR_MIN_ROWS);
+                    let base_rows = ((rows + threads - 1) / threads).max(BROADCAST_PAR_MIN_ROWS);
+                    let max_rows = (SCALE_PAR_MAX_CHUNK_ELEMS / cols)
+                        .max(BROADCAST_PAR_MIN_ROWS)
+                        .min(rows.max(1));
+                    let min_rows = (SCALE_PAR_MIN_CHUNK_ELEMS / cols)
+                        .max(BROADCAST_PAR_MIN_ROWS)
+                        .min(rows.max(1));
+                    let mut chunk_rows = base_rows.clamp(min_rows, max_rows);
+                    if rows >= 2 * BROADCAST_PAR_MIN_ROWS {
+                        let alignment = if rows >= 1024 { 128 } else { 64 };
+                        if chunk_rows >= alignment {
+                            let aligned = (chunk_rows / alignment).max(1) * alignment;
+                            if aligned <= max_rows {
+                                chunk_rows = aligned.max(min_rows).min(max_rows).min(rows);
+                            }
+                        }
+                    }
+                    let tile_rows = simd::row_tile_f64().max(1);
+                    if chunk_rows < tile_rows {
+                        chunk_rows = tile_rows.min(max_rows).min(rows);
+                    }
+                    let target_elems = (lhs.len() + threads - 1) / threads;
+                    let mut chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+                    if chunk_elems > target_elems {
+                        let desired_rows = (target_elems + cols - 1) / cols;
+                        let aligned_rows = (desired_rows / tile_rows).max(1) * tile_rows;
+                        chunk_rows = aligned_rows.clamp(min_rows, max_rows).min(rows);
+                        chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+                    }
+                    let chunk_elems = chunk_elems.min(lhs.len());
                     let start = Instant::now();
                     pool.install(|| {
                         use rayon::prelude::*;
-                        data.par_chunks_mut(cols)
-                            .with_min_len(min_rows)
-                            .zip(lhs.par_chunks(cols).with_min_len(min_rows))
-                            .zip(rhs.par_iter().with_min_len(min_rows).copied())
-                            .for_each(|((out_row, lhs_row), scalar)| {
-                                if !simd::add_row_scalar_f64(lhs_row, scalar, out_row) {
-                                    for (dst, &value) in out_row.iter_mut().zip(lhs_row.iter()) {
-                                        *dst = value + scalar;
+                        data.par_chunks_mut(chunk_elems)
+                            .zip(lhs.par_chunks(chunk_elems))
+                            .enumerate()
+                            .for_each(|(chunk_idx, (dst_block, src_block))| {
+                                let base_row = chunk_idx * (chunk_elems / cols);
+                                let row_count = dst_block.len() / cols;
+                                for local_row in 0..row_count {
+                                    let scalar = rhs[base_row + local_row];
+                                    let dst_row =
+                                        &mut dst_block[local_row * cols..(local_row + 1) * cols];
+                                    let src_row =
+                                        &src_block[local_row * cols..(local_row + 1) * cols];
+                                    if !simd::add_row_scalar_f64(src_row, scalar, dst_row) {
+                                        dst_row.copy_from_slice(src_row);
+                                        for value in dst_row.iter_mut() {
+                                            *value += scalar;
+                                        }
                                     }
                                 }
                             });
@@ -2459,6 +2669,7 @@ where
                         false,
                         BroadcastKind::Column,
                     );
+                    record_backend_metric(OPERATION_BROADCAST_COL, T::DTYPE_NAME, "simd");
                     let out_vec = unsafe {
                         let ptr = data.as_mut_ptr() as *mut T;
                         let len = data.len();
@@ -2468,12 +2679,99 @@ where
                     };
                     return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
                 }
+                let base_parallel =
+                    should_parallelize(rows, cols, T::DTYPE_NAME) || rows >= BROADCAST_PAR_MIN_ROWS;
+                let allow_parallel = broadcast_parallel_policy(
+                    BroadcastKind::Column,
+                    T::DTYPE_NAME,
+                    rows,
+                    cols,
+                    base_parallel,
+                );
+                if allow_parallel {
+                    if let Some(pool) = thread_pool() {
+                        let threads = pool.current_num_threads().max(1);
+                        let base_rows = ((rows + threads - 1) / threads).max(BROADCAST_PAR_MIN_ROWS);
+                        let max_rows = (SCALE_PAR_MAX_CHUNK_ELEMS / cols)
+                            .max(BROADCAST_PAR_MIN_ROWS)
+                            .min(rows.max(1));
+                        let min_rows = (SCALE_PAR_MIN_CHUNK_ELEMS / cols)
+                            .max(BROADCAST_PAR_MIN_ROWS)
+                            .min(rows.max(1));
+                        let mut chunk_rows = base_rows.clamp(min_rows, max_rows);
+                        if rows >= 2 * BROADCAST_PAR_MIN_ROWS {
+                            let alignment = if rows >= 1024 { 128 } else { 64 };
+                            if chunk_rows >= alignment {
+                                let aligned = (chunk_rows / alignment).max(1) * alignment;
+                                if aligned <= max_rows {
+                                    chunk_rows = aligned.max(min_rows).min(max_rows).min(rows);
+                                }
+                            }
+                        }
+                        let tile_rows = simd::row_tile_f64().max(1);
+                        if chunk_rows < tile_rows {
+                            chunk_rows = tile_rows.min(max_rows).min(rows);
+                        }
+                        let target_elems = (lhs.len() + threads - 1) / threads;
+                        let mut chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+                        if chunk_elems > target_elems {
+                            let desired_rows = (target_elems + cols - 1) / cols;
+                            let aligned_rows = (desired_rows / tile_rows).max(1) * tile_rows;
+                            chunk_rows = aligned_rows.clamp(min_rows, max_rows).min(rows);
+                            chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+                        }
+                        let chunk_elems = chunk_elems.min(lhs.len());
+                        pool.install(|| {
+                            use rayon::prelude::*;
+                            data.par_chunks_mut(chunk_elems)
+                                .zip(lhs.par_chunks(chunk_elems))
+                                .enumerate()
+                                .for_each(|(chunk_idx, (dst_block, src_block))| {
+                                    let base_row = chunk_idx * (chunk_elems / cols);
+                                    let row_count = dst_block.len() / cols;
+                                    for local_row in 0..row_count {
+                                        let scalar = rhs[base_row + local_row];
+                                        let dst_row =
+                                            &mut dst_block[local_row * cols..(local_row + 1) * cols];
+                                        let src_row =
+                                            &src_block[local_row * cols..(local_row + 1) * cols];
+                                        if !simd::add_row_scalar_f64(src_row, scalar, dst_row) {
+                                            dst_row.copy_from_slice(src_row);
+                                            for value in dst_row.iter_mut() {
+                                                *value += scalar;
+                                            }
+                                        }
+                                    }
+                                });
+                        });
+                        record_broadcast_event(
+                            T::DTYPE_NAME,
+                            rows,
+                            cols,
+                            start.elapsed(),
+                            true,
+                            BroadcastKind::Column,
+                        );
+                        record_backend_metric(OPERATION_BROADCAST_COL, T::DTYPE_NAME, "rayon_simd");
+                        let out_vec = unsafe {
+                            let ptr = data.as_mut_ptr() as *mut T;
+                            let len = data.len();
+                            let cap = data.capacity();
+                            std::mem::forget(data);
+                            Vec::from_raw_parts(ptr, len, cap)
+                        };
+                        return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+                    }
+                }
             }
             let start = Instant::now();
+            let mut used_simd = false;
             for (row_idx, chunk) in lhs.chunks(cols).enumerate() {
                 let scalar = rhs[row_idx];
                 let out_row = &mut data[row_idx * cols..(row_idx + 1) * cols];
-                if !simd::add_row_scalar_f64(chunk, scalar, out_row) {
+                if simd::add_row_scalar_f64(chunk, scalar, out_row) {
+                    used_simd = true;
+                } else {
                     out_row.copy_from_slice(chunk);
                     for value in out_row.iter_mut() {
                         *value += scalar;
@@ -2488,6 +2786,8 @@ where
                 false,
                 BroadcastKind::Column,
             );
+            let backend = if used_simd { "simd" } else { "scalar" };
+            record_backend_metric(OPERATION_BROADCAST_COL, T::DTYPE_NAME, backend);
             let out_vec = unsafe {
                 let ptr = data.as_mut_ptr() as *mut T;
                 let len = data.len();
@@ -2507,15 +2807,52 @@ where
                     data.set_len(total_len);
                     std::ptr::copy_nonoverlapping(lhs.as_ptr(), data.as_mut_ptr(), total_len);
                 }
+                let start = Instant::now();
+                if simd::add_column_broadcast_f32(lhs, rhs, rows, cols, data.as_mut_slice()) {
+                    record_broadcast_event(
+                        T::DTYPE_NAME,
+                        rows,
+                        cols,
+                        start.elapsed(),
+                        false,
+                        BroadcastKind::Column,
+                    );
+                    record_backend_metric(OPERATION_BROADCAST_COL, T::DTYPE_NAME, "simd");
+                    let out_vec = unsafe {
+                        let ptr = data.as_mut_ptr() as *mut T;
+                        let len = data.len();
+                        let cap = data.capacity();
+                        std::mem::forget(data);
+                        Vec::from_raw_parts(ptr, len, cap)
+                    };
+                    return Some(NumericArray::new_owned(out_vec, self.shape.clone()));
+                }
+                let mut used_accelerate = false;
                 for (row_idx, scalar) in rhs.iter().enumerate() {
-                    let start = row_idx * cols;
-                    let row_slice = &mut data[start..start + cols];
+                    let start_idx = row_idx * cols;
+                    let row_slice = &mut data[start_idx..start_idx + cols];
                     if !accelerate_vsadd_inplace_f32(row_slice, *scalar) {
                         for value in row_slice.iter_mut() {
                             *value += *scalar;
                         }
+                    } else {
+                        used_accelerate = true;
                     }
                 }
+                record_broadcast_event(
+                    T::DTYPE_NAME,
+                    rows,
+                    cols,
+                    start.elapsed(),
+                    false,
+                    BroadcastKind::Column,
+                );
+                let backend = if used_accelerate {
+                    "accelerate"
+                } else {
+                    "scalar"
+                };
+                record_backend_metric(OPERATION_BROADCAST_COL, T::DTYPE_NAME, backend);
                 let out_vec = unsafe {
                     let ptr = data.as_mut_ptr() as *mut T;
                     let len = data.len();
@@ -2541,20 +2878,57 @@ where
             if allow_parallel {
                 if let Some(pool) = thread_pool() {
                     let threads = pool.current_num_threads().max(1);
-                    let min_rows = ((rows + threads - 1) / threads).max(BROADCAST_PAR_MIN_ROWS);
+                    let base_rows = ((rows + threads - 1) / threads).max(BROADCAST_PAR_MIN_ROWS);
+                    let max_rows = (SCALE_PAR_MAX_CHUNK_ELEMS / cols)
+                        .max(BROADCAST_PAR_MIN_ROWS)
+                        .min(rows.max(1));
+                    let min_rows = (SCALE_PAR_MIN_CHUNK_ELEMS / cols)
+                        .max(BROADCAST_PAR_MIN_ROWS)
+                        .min(rows.max(1));
+                    let mut chunk_rows = base_rows.clamp(min_rows, max_rows);
+                    if rows >= 2 * BROADCAST_PAR_MIN_ROWS {
+                        let alignment = if rows >= 1024 { 128 } else { 64 };
+                        if chunk_rows >= alignment {
+                            let aligned = (chunk_rows / alignment).max(1) * alignment;
+                            if aligned <= max_rows {
+                                chunk_rows = aligned.max(min_rows).min(max_rows).min(rows);
+                            }
+                        }
+                    }
+                    let tile_rows = simd::row_tile_f32().max(1);
+                    if chunk_rows < tile_rows {
+                        chunk_rows = tile_rows.min(max_rows).min(rows);
+                    }
+                    let target_elems = (lhs.len() + threads - 1) / threads;
+                    let mut chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+                    if chunk_elems > target_elems {
+                        let desired_rows = (target_elems + cols - 1) / cols;
+                        let aligned_rows = (desired_rows / tile_rows).max(1) * tile_rows;
+                        chunk_rows = aligned_rows.clamp(min_rows, max_rows).min(rows);
+                        chunk_elems = cols.saturating_mul(chunk_rows.max(1));
+                    }
+                    let chunk_elems = chunk_elems.min(lhs.len());
                     let start = Instant::now();
                     pool.install(|| {
                         use rayon::prelude::*;
-                        data.par_chunks_mut(cols)
-                            .with_min_len(min_rows)
-                            .zip(lhs.par_chunks(cols).with_min_len(min_rows))
-                            .zip(rhs.par_iter().with_min_len(min_rows).copied())
-                            .for_each(|((out_row, lhs_row), scalar)| {
-                                if !simd::add_row_scalar_f32(lhs_row, scalar, out_row) {
-                                    if !accelerate_vsadd_f32(lhs_row, scalar, out_row) {
-                                        for (dst, &value) in out_row.iter_mut().zip(lhs_row.iter())
-                                        {
-                                            *dst = value + scalar;
+                        data.par_chunks_mut(chunk_elems)
+                            .zip(lhs.par_chunks(chunk_elems))
+                            .enumerate()
+                            .for_each(|(chunk_index, (dst_block, src_block))| {
+                                let base_row = chunk_index * (chunk_elems / cols);
+                                let row_count = dst_block.len() / cols;
+                                for local_row in 0..row_count {
+                                    let scalar = rhs[base_row + local_row];
+                                    let dst_row =
+                                        &mut dst_block[local_row * cols..(local_row + 1) * cols];
+                                    let src_row =
+                                        &src_block[local_row * cols..(local_row + 1) * cols];
+                                    if !simd::add_row_scalar_f32(src_row, scalar, dst_row) {
+                                        dst_row.copy_from_slice(src_row);
+                                        if !accelerate_vsadd_inplace_f32(dst_row, scalar) {
+                                            for value in dst_row.iter_mut() {
+                                                *value += scalar;
+                                            }
                                         }
                                     }
                                 }
@@ -2899,17 +3273,23 @@ where
             let input = self.data_slice();
             let input = unsafe { std::slice::from_raw_parts(input.as_ptr() as *const f64, len) };
             let out = unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f64, len) };
+            let dtype = "float64";
+            let simd_enabled = simd_is_enabled();
+            let blas_override = blas::scale_override().unwrap_or(false);
+            let blas_enabled = blas::scale_enabled();
+            let try_blas = (blas_override || blas_enabled)
+                && blas::should_use(blas::BlasOp::Scale, dtype, len, rows, cols, blas_override);
             if rows >= SCALE_FORCE_PARALLEL_ROWS
                 && cols >= SCALE_FORCE_PARALLEL_COLS
                 && parallel_scale_f64(input, factor, out, rows, cols)
             {
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
-            let simd_enabled = simd_is_enabled();
             if !simd_enabled {
                 out.copy_from_slice(input);
-                if blas::current_backend().dscal_f64(len, factor, out) {
+                if try_blas && blas::current_backend().dscal_f64(len, factor, out) {
                     record_scale_event("float64", rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, blas::backend_name());
                     return Ok(NumericArray::new_owned(data, self.shape.clone()));
                 }
             }
@@ -2918,14 +3298,15 @@ where
             } else {
                 ThreadingMode::Scalar
             };
-            if rows <= 512 && cols >= SCALE_PAR_MIN_ROWS {
+            if try_blas && rows <= 512 && cols >= SCALE_PAR_MIN_ROWS {
                 out.copy_from_slice(input);
                 if blas::current_backend().dscal_f64(len, factor, out) {
                     record_scale_event("float64", rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, blas::backend_name());
                     return Ok(NumericArray::new_owned(data, self.shape.clone()));
                 }
             }
-            if blas::scale_enabled()
+            if try_blas
                 && len >= SCALE_BLAS_MIN_LEN
                 && rows >= SCALE_BLAS_MIN_ROWS
                 && cols >= SCALE_BLAS_MIN_COLS
@@ -2933,33 +3314,46 @@ where
                 out.copy_from_slice(input);
                 if blas::current_backend().dscal_f64(len, factor, out) {
                     record_scale_event("float64", rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, blas::backend_name());
                     return Ok(NumericArray::new_owned(data, self.shape.clone()));
                 }
             }
             if len <= SMALL_DIRECT_THRESHOLD {
-                if !simd::scale_same_shape_f64(input, factor, out) {
+                if simd::scale_same_shape_f64(input, factor, out) {
+                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
+                } else {
                     scale_block_scalar_f64(input, factor, out);
+                    record_backend_metric(OPERATION_SCALE, dtype, "scalar");
                 }
                 record_scale_event("float64", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
-                if !simd::scale_same_shape_f64(input, factor, out) {
+                if simd::scale_same_shape_f64(input, factor, out) {
+                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
+                } else {
                     scale_block_scalar_f64(input, factor, out);
+                    record_backend_metric(OPERATION_SCALE, dtype, "scalar");
                 }
                 record_scale_event("float64", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if rows <= SCALE_TINY_DIM && cols <= SCALE_TINY_DIM {
-                if !simd::scale_same_shape_f64(input, factor, out) {
+                if simd::scale_same_shape_f64(input, factor, out) {
+                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
+                } else {
                     scale_block_scalar_f64(input, factor, out);
+                    record_backend_metric(OPERATION_SCALE, dtype, "scalar");
                 }
                 record_scale_event("float64", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if rows <= 512 && cols <= 512 {
-                if !simd::scale_same_shape_f64(input, factor, out) {
+                if simd::scale_same_shape_f64(input, factor, out) {
+                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
+                } else {
                     scale_block_scalar_f64(input, factor, out);
+                    record_backend_metric(OPERATION_SCALE, dtype, "scalar");
                 }
                 record_scale_event("float64", rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
@@ -2984,84 +3378,94 @@ where
             }
             if simd::scale_same_shape_f64(input, factor, out) {
                 record_scale_event("float64", rows, cols, start.elapsed(), false);
+                record_backend_metric(OPERATION_SCALE, dtype, "simd");
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
         } else if T::DTYPE_NAME == "float32" {
+            let dtype = "float32";
             let input = self.data_slice();
             let input = unsafe { std::slice::from_raw_parts(input.as_ptr() as *const f32, len) };
             let out = unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut f32, len) };
             let factor_f32 = factor as f32;
             let simd_enabled = simd_is_enabled();
+            let elements = rows.saturating_mul(cols);
             let blas_override = blas::scale_override().unwrap_or(false);
             let blas_enabled = blas::scale_enabled();
+            let try_blas = (blas_override || blas_enabled)
+                && blas::should_use(blas::BlasOp::Scale, dtype, len, rows, cols, blas_override);
+            let allow_blas = if simd_enabled {
+                elements >= (SCALE_FORCE_PARALLEL_ELEMS << 1)
+            } else {
+                true
+            };
             if !simd_enabled {
-                if accelerate_vsmul_f32(input, factor_f32, out) {
-                    record_scale_event("float32", rows, cols, start.elapsed(), false);
+                // For small matrices without SIMD, skip parallel scaling and use Accelerate/BLAS directly
+                let skip_parallel = elements < (1024 * 1024);
+                if !skip_parallel && parallel_scale_f32(input, factor, out, rows, cols, simd_enabled) {
                     return Ok(NumericArray::new_owned(data, self.shape.clone()));
                 }
-
-                if (blas_override || blas_enabled)
-                    && len >= SCALE_BLAS_MIN_LEN
-                    && rows >= SCALE_BLAS_MIN_ROWS
-                    && cols >= SCALE_BLAS_MIN_COLS
-                {
+                if accelerate_vsmul_f32(input, factor_f32, out) {
+                    record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, "accelerate");
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+                if try_blas && allow_blas {
                     out.copy_from_slice(input);
                     if blas::current_backend().sscal_f32(len, factor_f32, out) {
-                        record_scale_event("float32", rows, cols, start.elapsed(), false);
+                        record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                        record_backend_metric(OPERATION_SCALE, dtype, blas::backend_name());
                         return Ok(NumericArray::new_owned(data, self.shape.clone()));
                     }
                 }
-            }
-            if (blas_override || blas_enabled)
-                && len >= SCALE_BLAS_MIN_LEN
-                && rows >= SCALE_BLAS_MIN_ROWS
-                && cols >= SCALE_BLAS_MIN_COLS
-            {
-                out.copy_from_slice(input);
-                if blas::current_backend().sscal_f32(len, factor_f32, out) {
-                    record_scale_event("float32", rows, cols, start.elapsed(), false);
-                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
-                }
-            }
-            if simd_enabled && accelerate_vsmul_f32(input, factor_f32, out) {
-                record_scale_event("float32", rows, cols, start.elapsed(), false);
-                return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if len <= SMALL_DIRECT_THRESHOLD {
                 if !simd::scale_same_shape_f32(input, factor_f32, out) {
                     if !accelerate_vsmul_f32(input, factor_f32, out) {
                         scale_block_scalar_f32(input, factor_f32, out);
+                        record_backend_metric(OPERATION_SCALE, dtype, "scalar");
+                    } else {
+                        record_backend_metric(OPERATION_SCALE, dtype, "accelerate");
                     }
+                } else {
+                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
                 }
-                record_scale_event("float32", rows, cols, start.elapsed(), false);
+                record_scale_event(dtype, rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
                 if !simd::scale_same_shape_f32(input, factor_f32, out) {
                     if !accelerate_vsmul_f32(input, factor_f32, out) {
                         scale_block_scalar_f32(input, factor_f32, out);
+                        record_backend_metric(OPERATION_SCALE, dtype, "scalar");
+                    } else {
+                        record_backend_metric(OPERATION_SCALE, dtype, "accelerate");
                     }
+                } else {
+                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
                 }
-                record_scale_event("float32", rows, cols, start.elapsed(), false);
+                record_scale_event(dtype, rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if rows <= SCALE_TINY_DIM && cols <= SCALE_TINY_DIM {
                 if !simd::scale_same_shape_f32(input, factor_f32, out) {
                     if !accelerate_vsmul_f32(input, factor_f32, out) {
                         scale_block_scalar_f32(input, factor_f32, out);
+                        record_backend_metric(OPERATION_SCALE, dtype, "scalar");
+                    } else {
+                        record_backend_metric(OPERATION_SCALE, dtype, "accelerate");
                     }
+                } else {
+                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
                 }
-                record_scale_event("float32", rows, cols, start.elapsed(), false);
+                record_scale_event(dtype, rows, cols, start.elapsed(), false);
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
-            let elements = rows.saturating_mul(cols);
             let mode = if simd_enabled {
                 ThreadingMode::Simd
             } else {
                 ThreadingMode::Scalar
             };
-            let (mut parallel_cutover, prefer_parallel_raw) =
-                scale_parallel_policy("float32", mode);
+            let (mut parallel_cutover, prefer_parallel_raw) = scale_parallel_policy(dtype, mode);
             if !simd_enabled {
                 parallel_cutover = parallel_cutover.max(SCALE_FORCE_PARALLEL_ELEMS << 1);
             }
@@ -3074,33 +3478,76 @@ where
                 || (rows >= SCALE_PAR_MIN_ROWS * 4 && cols >= BROADCAST_PAR_MIN_COLS)
                 || (rows >= SCALE_PAR_MIN_ROWS * 2 && elements >= PARALLEL_MIN_ELEMENTS / 2);
             let large_square = rows >= 4096 && cols >= 4096;
+            // For 2048², prioritize Accelerate first due to high variance in parallel path
+            // Explicitly check for 2048² to avoid parallel overhead
+            let medium_large_square = (rows == 2048 && cols == 2048) || (rows >= 2048 && cols >= 2048 && rows < 4096 && cols < 4096);
+            
+            // For 2048², skip parallel entirely and use Accelerate -> sequential SIMD -> scalar
+            if medium_large_square && simd_enabled {
+                if accelerate_vsmul_f32(input, factor_f32, out) {
+                    record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, "accelerate");
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+                // If Accelerate fails, try sequential SIMD (not parallel) for 2048²
+                if simd::scale_same_shape_f32(input, factor_f32, out) {
+                    record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+                // If both fail, fall through to scalar (don't use parallel for 2048²)
+            }
+            
             let allow_parallel_eval = if simd_enabled {
-                true
+                elements >= (SCALE_FORCE_PARALLEL_ELEMS << 1)
+                    || rows >= SCALE_PAR_MIN_ROWS * 8
+                    || cols >= SCALE_PAR_MIN_ROWS * 8
             } else {
                 elements >= PARALLEL_MIN_ELEMENTS
             };
-            let should_try_parallel = allow_parallel_eval
-                && base_parallel
-                && !large_square
-                && elements >= parallel_cutover
-                && prefer_parallel;
-            let force_parallel = allow_parallel_eval
-                && base_parallel
-                && !large_square
-                && elements >= SCALE_FORCE_PARALLEL_ELEMS
-                && elements >= parallel_cutover;
-            let allow_parallel = simd_enabled
-                && (should_try_parallel || force_parallel)
-                && parallel_scale_f32(input, factor, out, rows, cols);
-            let allow_parallel = simd_enabled
-                && (should_try_parallel || force_parallel)
-                && parallel_scale_f32(input, factor, out, rows, cols);
-            if allow_parallel {
-                return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            // Explicitly disable parallel for 2048² to avoid overhead
+            let should_try_parallel = if medium_large_square {
+                false
+            } else {
+                allow_parallel_eval
+                    && base_parallel
+                    && !large_square
+                    && elements >= parallel_cutover
+                    && prefer_parallel
+            };
+            let force_parallel = if medium_large_square {
+                false
+            } else {
+                allow_parallel_eval
+                    && base_parallel
+                    && !large_square
+                    && elements >= SCALE_FORCE_PARALLEL_ELEMS
+                    && elements >= parallel_cutover
+            };
+            
+            // For medium-large squares (2048²), parallel was already handled above
+            if should_try_parallel || force_parallel {
+                if parallel_scale_f32(input, factor, out, rows, cols, simd_enabled) {
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
             }
             if simd::scale_same_shape_f32(input, factor_f32, out) {
-                record_scale_event("float32", rows, cols, start.elapsed(), false);
+                record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                record_backend_metric(OPERATION_SCALE, dtype, "simd");
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            if simd_enabled && accelerate_vsmul_f32(input, factor_f32, out) {
+                record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                record_backend_metric(OPERATION_SCALE, dtype, "accelerate");
+                return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            if allow_blas && try_blas {
+                out.copy_from_slice(input);
+                if blas::current_backend().sscal_f32(len, factor_f32, out) {
+                    record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, blas::backend_name());
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
             }
         }
         T::simd_scale(self.data_slice(), factor, &mut data).map_err(|_| {
@@ -3109,6 +3556,8 @@ where
                 T::DTYPE_NAME
             ))
         })?;
+        let backend_label = if simd_is_enabled() { "simd" } else { "scalar" };
+        record_backend_metric(OPERATION_SCALE, T::DTYPE_NAME, backend_label);
         record_scale_event(T::DTYPE_NAME, rows, cols, start.elapsed(), false);
         Ok(NumericArray::new_owned(data, self.shape.clone()))
     }
@@ -4578,6 +5027,17 @@ fn threading_info_py(py: Python<'_>) -> PyResult<PyObject> {
         thresholds_dict.set_item(entry.dtype, entry_dict)?;
     }
     info.set_item("adaptive_thresholds", thresholds_dict)?;
+
+    let backend_list = PyList::empty_bound(py);
+    for entry in snapshot.backend_usage {
+        let usage = PyDict::new_bound(py);
+        usage.set_item("operation", entry.operation)?;
+        usage.set_item("dtype", entry.dtype)?;
+        usage.set_item("backend", entry.backend)?;
+        usage.set_item("count", entry.count)?;
+        backend_list.append(usage)?;
+    }
+    info.set_item("backend_usage", backend_list)?;
 
     if let Some(event) = snapshot.last_event {
         let event_dict = PyDict::new_bound(py);

@@ -1,0 +1,9 @@
+{
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "machine": "Odoss-Mac-mini.local",
+    "num_cpu": "10",
+    "os": "Darwin 24.6.0",
+    "ram": "17179869184",
+    "version": 1
+}

@@ -75,13 +75,17 @@ numpy_view[1, 1] = 99.0
 assert alias.to_list()[4] == 99.0
 ```
 
-### Performance Controls
+### Performance & Controls
 
 - Check whether the vectorized kernels are active via `raptors.simd_enabled()`.
 - Force-disable or force-enable SIMD at import time with `RAPTORS_SIMD=0` or `RAPTORS_SIMD=1`.
 - Control the Rayon pool used for large 2-D workloads with `RAPTORS_THREADS=<N>` (values ≤1 fall back to single-threaded execution).
-- Inspect adaptive thresholds, last operation timings, and pool sizing with `raptors.threading_info()`.
-- Contiguous elementwise add/scale and row/column broadcasts now use the SIMD path, and large matrices fan out across threads automatically.
+- Inspect adaptive thresholds, backend usage, and pool sizing with `raptors.threading_info()`. The diagnostics now include per-operation backend counters (SIMD, Rayon-SIMD, BLAS, Scalar) so you can confirm which path executed.
+- Contiguous elementwise add/scale and row/column broadcasts prioritize SIMD first, then fall back to Accelerate or scalar code when heuristics predict it will be faster. Multi-thread fan-out is driven by adaptive chunk sizing tuned for 1024²–4096² grids.
+- Recent float32 improvements put us ahead of NumPy on several hot paths (see `docs/perf_report.md` for the running table). Highlights on an Apple M3 Pro:
+  - `scale` 1024² (threads=auto): **0.31 ms** vs NumPy **0.40 ms** (≈1.29×).
+  - `scale` 2048² transpose: **0.34 ms** vs **0.41 ms** (≈1.21×).
+  - `broadcast_add` transpose 2048²: **0.40 ms** vs **0.69 ms** (≈1.73×).
 - The benchmarking helper accepts presets and JSON export for repeatable runs:
 
   ```bash
@@ -98,6 +102,25 @@ assert alias.to_list()[4] == 99.0
       --warmup 1 --repeats 7 \
       --validate-json benchmarks/baselines/2d_float64.json --validate-slack 0.05
   ```
+
+### ASV Benchmarks
+
+- Airspeed Velocity is configured in `benchmarks/`; the quick smoke run mirrors NumPy parity checks:
+
+  ```bash
+  cd benchmarks
+  ../.venv/bin/asv run --python=../.venv/bin/python --quick
+  ```
+
+- For baseline refreshes (e.g., after performance improvements):
+
+  ```bash
+  cd benchmarks
+  ../.venv/bin/asv run --python=../.venv/bin/python --steps 3
+  rsync -a .asv/results/ baselines/asv/
+  ```
+
+- See `docs/perf/asv_setup.md` for full environment instructions and `docs/perf_report.md` for current win/loss tracking against NumPy.
 
 ### Running Tests
 

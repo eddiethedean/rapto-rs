@@ -48,6 +48,15 @@ class ThreadingDiagnostics:
     thread_pool: Optional[Dict[str, int]]
     adaptive_thresholds: Dict[str, AdaptiveThreshold]
     last_event: Optional[LastEvent]
+    backend_usage: List["BackendUsage"]
+
+
+@dataclass(frozen=True)
+class BackendUsage:
+    operation: str
+    dtype: str
+    backend: str
+    count: int
 
 
 def _coerce_int_map(payload) -> Dict[str, int]:
@@ -111,6 +120,23 @@ def _build_adaptive_thresholds(payload) -> Dict[str, AdaptiveThreshold]:
     return result
 
 
+def _build_backend_usage(payload) -> List[BackendUsage]:
+    entries: List[BackendUsage] = []
+    for item in payload or []:
+        try:
+            entries.append(
+                BackendUsage(
+                    operation=str(item.get("operation", "")),
+                    dtype=str(item.get("dtype", "")),
+                    backend=str(item.get("backend", "")),
+                    count=int(item.get("count", 0)),
+                )
+            )
+        except Exception:
+            continue
+    return entries
+
+
 def _build_last_event(payload) -> Optional[LastEvent]:
     if not isinstance(payload, dict):
         return None
@@ -150,5 +176,6 @@ def threading_info() -> ThreadingDiagnostics:
         thread_pool=_coerce_pool(raw.get("thread_pool")),
         adaptive_thresholds=_build_adaptive_thresholds(raw.get("adaptive_thresholds")),
         last_event=_build_last_event(raw.get("last_event")),
+        backend_usage=_build_backend_usage(raw.get("backend_usage")),
     )
 

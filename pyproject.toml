@@ -19,6 +19,21 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "numpy<2",
+    "maturin>=1.5,<2.0",
+]
+test = [
+    "pytest>=7.0.0",
+    "numpy<2",
+]
+benchmark = [
+    "asv>=0.6.0",
+    "numpy<2",
+]
+
 [project.urls]
 Homepage = "https://github.com/eddiethedean/raptors"
 Source = "https://github.com/eddiethedean/raptors"

@@ -14,16 +14,34 @@
   (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float64 --operations broadcast_add --simd-mode force --warmup 1 --repeats 21`)
 - `float32` `broadcast_add` (row vector) @ `1024²`, `--simd-mode disable`: **0.26 ms** (NumPy 0.26 ms, 1.02×) — parity within noise; SIMD mode remains the recommended path for float32.  
   (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float32 --operations broadcast_add --simd-mode disable --warmup 2 --repeats 21`)
-- `float32` `scale` @ `1024²`: **0.21 ms** (NumPy 0.26 ms, 1.23×) — row-aligned scheduling keeps the SIMD+xRayon path ahead without forcing BLAS.  
-  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float32 --operations scale --simd-mode force --warmup 2 --repeats 60 --output-json benchmarks/results/f32_scale_diag/scale_f32_1024_simd_tuned2.json`)
-- `float32` `scale` @ `2048²`: **0.38 ms** (NumPy 0.44 ms, 1.16×) — large square matrices now use the parallel path again, improving headroom without reintroducing jitter.  
-  (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 2048x2048 --dtype float32 --operations scale --simd-mode force --warmup 2 --repeats 60 --output-json benchmarks/results/f32_scale_diag/scale_f32_2048_simd_tuned2.json`)
+- `float32` `scale` @ `1024²`, `threads=auto`: **0.31 ms** (NumPy 0.40 ms, 1.29×) — smaller Rayon chunks keep all workers busy, pushing us well ahead of NumPy without falling back to BLAS.  
+  (`cd benchmarks && ../.venv/bin/asv run --python=../.venv/bin/python --quick --bench bench_scale.ScaleSuite.time_numpy_scale --bench bench_scale.ScaleSuite.time_raptors_scale`)
+- `float32` `scale` @ `2048²`, `threads=auto`: **0.44 ms** (NumPy 0.47 ms, 1.08×) — optimized chunk sizing for 2048² uses fewer, larger chunks (2-4 instead of 8+) to reduce threading overhead, now consistently ahead of NumPy.  
+  (`PYTHONPATH=python python scripts/compare_numpy_raptors.py --shape 2048x2048 --dtype float32 --operations scale --simd-mode auto --warmup 3 --repeats 30`)
+- `float32` `broadcast_add` (transpose layout) @ `1024²`: **0.28 ms** (NumPy 0.34 ms, 1.21×) — the new row-tiling keeps small transpose cases ahead.  
+  (`python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float32 --operations broadcast_add --layout transpose --simd-mode auto --warmup 2 --repeats 60`)
+- `float32` `broadcast_add` (transpose layout) @ `2048²`: **0.40 ms** (NumPy 0.69 ms, 1.73×) — chunked column tiles reuse cache lines, giving a sizable lead at large sizes.  
+  (`python scripts/compare_numpy_raptors.py --shape 2048x2048 --dtype float32 --operations broadcast_add --layout transpose --simd-mode auto --warmup 2 --repeats 20`)
 - `float64` `scale` @ `512²`: **0.11 ms** (NumPy 0.13 ms, 1.15×) — small shapes now dispatch to BLAS automatically after heuristics confirm it wins.  
   (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float64 --operations scale --simd-mode force --warmup 2 --repeats 200 --output-json benchmarks/results/f32_scale_diag/scale_f64_512_simd_tuned2.json`)
 - `float32` @ `512²` `mean_axis0`: **0.021 ms** (NumPy 0.029 ms, 4.8×) — unchanged small-matrix performance with SIMD lanes.  
   (`PYTHONPATH=python RAPTORS_THREADS=10 python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float32 --operations mean_axis0 --simd-mode force --warmup 2 --repeats 21`)
+- `float32` `broadcast_add` (column, contiguous) @ `512²`: **0.03 ms** (NumPy 0.05 ms, 1.57×) — the small-matrix path now short-circuits Rayon setup and stays SIMD-only.  
+  (`python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float32 --operations broadcast_add --layout contiguous --simd-mode auto --warmup 3 --repeats 50`)
+- `float32` `scale` @ `512²`, `--simd-mode disable`: **0.01 ms** (NumPy 0.02 ms, 3.13×) — scalar fallback uses Accelerate/BLAS directly for small matrices, beating NumPy by a wide margin.  
+  (`python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float32 --operations scale --simd-mode disable --warmup 3 --repeats 50`)
+- `float32` `scale` @ `1024²`, `--simd-mode disable`: **0.29 ms** (NumPy 0.34 ms, 1.19×) — mid-sized scalar scale reuses parallel chunking with BLAS fallback, maintaining advantage over NumPy.  
+  (`python scripts/compare_numpy_raptors.py --shape 1024x1024 --dtype float32 --operations scale --simd-mode disable --warmup 3 --repeats 40`)
+- `float32` `scale` @ `2048²`, `--simd-mode disable`: **0.32 ms** (NumPy 0.36 ms, 1.11×) — large scalar scale benefits from parallel chunking, now ahead of NumPy.  
+  (`python scripts/compare_numpy_raptors.py --shape 2048x2048 --dtype float32 --operations scale --simd-mode disable --warmup 3 --repeats 30`)
+- `float32` `broadcast_add` @ `512²`, `--simd-mode force`: **0.02 ms** (NumPy 0.03 ms, 1.53×) — forced SIMD on small matrices uses optimized direct path, beating NumPy consistently.  
+  (`python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float32 --operations broadcast_add --layout contiguous --simd-mode force --warmup 3 --repeats 50`)
+- `float32` `broadcast_add` @ `512²`, `RAPTORS_THREADS=4`: **0.02 ms** (NumPy 0.03 ms, 1.56×) — thread override on small matrices maintains performance advantage.  
+  (`RAPTORS_THREADS=4 python scripts/compare_numpy_raptors.py --shape 512x512 --dtype float32 --operations broadcast_add --layout contiguous --simd-mode auto --warmup 3 --repeats 50`)
+- `float64` `broadcast_add` @ `2048²`, `simd-mode auto`: **2.62 ms** (NumPy 3.44 ms, 1.31× average) — extended parallel tiling with float64-specific cache alignment eliminates variance; now consistently ahead of NumPy (1.15× - 1.34× range across runs).  
+  (`PYTHONPATH=python python scripts/compare_numpy_raptors.py --shape 2048x2048 --dtype float64 --operations broadcast_add --layout contiguous --simd-mode auto --warmup 3 --repeats 30`)
 
-Axis-0 reducers now prefer the available BLAS backend once row/column thresholds are met, while row broadcast adds reuse BLAS `axpy` routines (with scalar fallbacks if BLAS is disabled).  Scaling keeps the SIMD/parallel heuristics by default; opt in with `RAPTORS_BLAS_SCALE=1` when the downstream BLAS beats the native path for a given matrix shape.
+Axis-0 reducers now prefer the available BLAS backend once row/column thresholds are met, while row broadcast adds reuse BLAS `axpy` routines (with scalar fallbacks if BLAS is disabled).  Scaling keeps the SIMD/parallel heuristics by default; opt in with `RAPTORS_BLAS_SCALE=1` when the downstream BLAS beats the native path for a given matrix shape.  Large float64 broadcasts now use parallel tiling with cache-aligned chunking, matching float32 performance characteristics.
 
 The SIMD suite continues to use `--simd-mode force`; pinning threads via `RAPTORS_THREADS=10` matches the latest guardrail runs and reduces variance.
 

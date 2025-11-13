@@ -7,6 +7,7 @@ from typing import Iterable, List, Sequence, Tuple, Union
 from . import _raptors as _core
 from .threading import (
     AdaptiveThreshold,
+    BackendUsage,
     LastEvent,
     ThreadingDiagnostics,
     threading_info,
@@ -49,6 +50,7 @@ __all__ = [
     "ThreadingDiagnostics",
     "AdaptiveThreshold",
     "LastEvent",
+    "BackendUsage",
 ]
 
 __version__ = getattr(_core, "__version__", "0.0.2")

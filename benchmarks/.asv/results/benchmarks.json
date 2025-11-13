@@ -1,0 +1,291 @@
+{
+    "bench_broadcast.BroadcastSuite.time_numpy": {
+        "code": "class BroadcastSuite:\n    def time_numpy(self, *params):\n        np.add(self.numpy_array, self.rhs_numpy)\n\n    def setup(self, shape, dtype, operation, layout, simd_mode, threads):\n        configure_env(threads=threads, simd_mode=simd_mode)\n        self.numpy_array, self.raptors_array = make_inputs(shape, dtype, layout)\n        self.operation = operation\n    \n        if operation == \"same\":\n            rhs_np = np.flip(self.numpy_array, axis=-1).copy()\n        elif operation == \"row\":\n            rhs_np = np.arange(self.numpy_array.shape[1], dtype=self.numpy_array.dtype)\n        elif operation == \"column\":\n            rhs_np = np.arange(self.numpy_array.shape[0], dtype=self.numpy_array.dtype).reshape(\n                -1, 1\n            )\n        else:\n            raise ValueError(f\"Unsupported operation {operation}\")\n    \n        self.rhs_numpy = rhs_np\n        self.rhs_raptors = (\n            self.raptors_array\n            if operation == \"same\"\n            else (raptors.from_numpy(rhs_np) if operation in {\"row\", \"column\"} else None)\n        )\n    \n        if operation == \"same\":\n            self.rhs_raptors = raptors.from_numpy(self.rhs_numpy)",
+        "min_run_count": 2,
+        "name": "bench_broadcast.BroadcastSuite.time_numpy",
+        "number": 0,
+        "param_names": [
+            "shape",
+            "dtype",
+            "operation",
+            "layout",
+            "simd_mode",
+            "threads"
+        ],
+        "params": [
+            [
+                "(512, 512)",
+                "(1024, 1024)"
+            ],
+            [
+                "'float32'",
+                "'float64'"
+            ],
+            [
+                "'same'",
+                "'row'",
+                "'column'"
+            ],
+            [
+                "'contiguous'",
+                "'transpose'"
+            ],
+            [
+                "'auto'",
+                "'force'"
+            ],
+            [
+                "'auto'",
+                "1",
+                "4"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "903edba72a07b5cff69072d1826e4214186d98f4b5c8a61506ae34938325deaf",
+        "warmup_time": -1
+    },
+    "bench_broadcast.BroadcastSuite.time_raptors": {
+        "code": "class BroadcastSuite:\n    def time_raptors(self, *params):\n        raptors.broadcast_add(self.raptors_array, self.rhs_raptors)\n\n    def setup(self, shape, dtype, operation, layout, simd_mode, threads):\n        configure_env(threads=threads, simd_mode=simd_mode)\n        self.numpy_array, self.raptors_array = make_inputs(shape, dtype, layout)\n        self.operation = operation\n    \n        if operation == \"same\":\n            rhs_np = np.flip(self.numpy_array, axis=-1).copy()\n        elif operation == \"row\":\n            rhs_np = np.arange(self.numpy_array.shape[1], dtype=self.numpy_array.dtype)\n        elif operation == \"column\":\n            rhs_np = np.arange(self.numpy_array.shape[0], dtype=self.numpy_array.dtype).reshape(\n                -1, 1\n            )\n        else:\n            raise ValueError(f\"Unsupported operation {operation}\")\n    \n        self.rhs_numpy = rhs_np\n        self.rhs_raptors = (\n            self.raptors_array\n            if operation == \"same\"\n            else (raptors.from_numpy(rhs_np) if operation in {\"row\", \"column\"} else None)\n        )\n    \n        if operation == \"same\":\n            self.rhs_raptors = raptors.from_numpy(self.rhs_numpy)",
+        "min_run_count": 2,
+        "name": "bench_broadcast.BroadcastSuite.time_raptors",
+        "number": 0,
+        "param_names": [
+            "shape",
+            "dtype",
+            "operation",
+            "layout",
+            "simd_mode",
+            "threads"
+        ],
+        "params": [
+            [
+                "(512, 512)",
+                "(1024, 1024)"
+            ],
+            [
+                "'float32'",
+                "'float64'"
+            ],
+            [
+                "'same'",
+                "'row'",
+                "'column'"
+            ],
+            [
+                "'contiguous'",
+                "'transpose'"
+            ],
+            [
+                "'auto'",
+                "'force'"
+            ],
+            [
+                "'auto'",
+                "1",
+                "4"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "81b02aa3d2258e25cfd96bf475b63174f26852287970eace0f1f526d0d2534d7",
+        "warmup_time": -1
+    },
+    "bench_reductions.ReductionSuite.time_numpy": {
+        "code": "class ReductionSuite:\n    def time_numpy(self, *params):\n        self._numpy_op()\n\n    def setup(self, shape, dtype, layout, operation, simd_mode, threads):\n        configure_env(threads=threads, simd_mode=simd_mode)\n        self.numpy_array, self.raptors_array = make_inputs(shape, dtype, layout)\n        self.operation = operation",
+        "min_run_count": 2,
+        "name": "bench_reductions.ReductionSuite.time_numpy",
+        "number": 0,
+        "param_names": [
+            "shape",
+            "dtype",
+            "layout",
+            "operation",
+            "simd_mode",
+            "threads"
+        ],
+        "params": [
+            [
+                "(512, 512)",
+                "(1024, 1024)"
+            ],
+            [
+                "'float32'",
+                "'float64'"
+            ],
+            [
+                "'contiguous'",
+                "'transpose'"
+            ],
+            [
+                "'sum'",
+                "'mean'",
+                "'mean_axis0'",
+                "'mean_axis1'"
+            ],
+            [
+                "'auto'",
+                "'force'"
+            ],
+            [
+                "'auto'",
+                "1",
+                "4"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "8ba1085a45e9be7375af2b9d16046b83494cde1d175627735ce0a55286219778",
+        "warmup_time": -1
+    },
+    "bench_reductions.ReductionSuite.time_raptors": {
+        "code": "class ReductionSuite:\n    def time_raptors(self, *params):\n        self._raptors_op()\n\n    def setup(self, shape, dtype, layout, operation, simd_mode, threads):\n        configure_env(threads=threads, simd_mode=simd_mode)\n        self.numpy_array, self.raptors_array = make_inputs(shape, dtype, layout)\n        self.operation = operation",
+        "min_run_count": 2,
+        "name": "bench_reductions.ReductionSuite.time_raptors",
+        "number": 0,
+        "param_names": [
+            "shape",
+            "dtype",
+            "layout",
+            "operation",
+            "simd_mode",
+            "threads"
+        ],
+        "params": [
+            [
+                "(512, 512)",
+                "(1024, 1024)"
+            ],
+            [
+                "'float32'",
+                "'float64'"
+            ],
+            [
+                "'contiguous'",
+                "'transpose'"
+            ],
+            [
+                "'sum'",
+                "'mean'",
+                "'mean_axis0'",
+                "'mean_axis1'"
+            ],
+            [
+                "'auto'",
+                "'force'"
+            ],
+            [
+                "'auto'",
+                "1",
+                "4"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "dcd25cf818b44ca26398d664d90e53e5eaea0217c7818a18fa8a781f7ff420ca",
+        "warmup_time": -1
+    },
+    "bench_scale.ScaleSuite.time_numpy_scale": {
+        "code": "class ScaleSuite:\n    def time_numpy_scale(self, *params):\n        # NumPy broadcast multiply\n        _ = self.numpy_array * self.factor\n\n    def setup(self, shape, dtype, layout, simd_mode, threads):\n        configure_env(threads=threads, simd_mode=simd_mode)\n        self.numpy_array, self.raptors_array = make_inputs(shape, dtype, layout)\n        self.factor = scale_factor(dtype)",
+        "min_run_count": 2,
+        "name": "bench_scale.ScaleSuite.time_numpy_scale",
+        "number": 0,
+        "param_names": [
+            "shape",
+            "dtype",
+            "layout",
+            "simd_mode",
+            "threads"
+        ],
+        "params": [
+            [
+                "(512, 512)",
+                "(1024, 1024)",
+                "(2048, 2048)"
+            ],
+            [
+                "'float32'",
+                "'float64'"
+            ],
+            [
+                "'contiguous'",
+                "'transpose'"
+            ],
+            [
+                "'auto'",
+                "'force'",
+                "'disable'"
+            ],
+            [
+                "'auto'",
+                "1",
+                "4"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "6af35a51ffa08487d9b48f4685f63394aef35c7fa1534eb1a51ad662aca5e3d3",
+        "warmup_time": -1
+    },
+    "bench_scale.ScaleSuite.time_raptors_scale": {
+        "code": "class ScaleSuite:\n    def time_raptors_scale(self, *params):\n        self.raptors_array.scale(self.factor)\n\n    def setup(self, shape, dtype, layout, simd_mode, threads):\n        configure_env(threads=threads, simd_mode=simd_mode)\n        self.numpy_array, self.raptors_array = make_inputs(shape, dtype, layout)\n        self.factor = scale_factor(dtype)",
+        "min_run_count": 2,
+        "name": "bench_scale.ScaleSuite.time_raptors_scale",
+        "number": 0,
+        "param_names": [
+            "shape",
+            "dtype",
+            "layout",
+            "simd_mode",
+            "threads"
+        ],
+        "params": [
+            [
+                "(512, 512)",
+                "(1024, 1024)",
+                "(2048, 2048)"
+            ],
+            [
+                "'float32'",
+                "'float64'"
+            ],
+            [
+                "'contiguous'",
+                "'transpose'"
+            ],
+            [
+                "'auto'",
+                "'force'",
+                "'disable'"
+            ],
+            [
+                "'auto'",
+                "1",
+                "4"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "14513794cd78c7ba6f1a234b5bb177d253464b82956a712d00f241c5342375d7",
+        "warmup_time": -1
+    },
+    "version": 2
+}

@@ -2,6 +2,9 @@
 
 use std::sync::OnceLock;
 
+mod backend;
+pub use backend::{col_tile_f64, prefetched_rows, row_tile_f32, row_tile_f64};
+
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use self::dispatch::{Candidate, DispatchResult, DispatchTable, SimdLevel};
 

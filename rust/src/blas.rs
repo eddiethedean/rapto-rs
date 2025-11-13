@@ -1,5 +1,11 @@
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::env;
+use std::fs;
+use std::path::Path;
 use std::sync::OnceLock;
+
+use crate::{SCALE_BLAS_MIN_COLS, SCALE_BLAS_MIN_LEN, SCALE_BLAS_MIN_ROWS};
 
 pub trait BlasProvider: Send + Sync {
     fn name(&self) -> &'static str;
@@ -126,6 +132,7 @@ impl BlasProvider for AccelerateBlas {
 static BACKEND: OnceLock<Box<dyn BlasProvider>> = OnceLock::new();
 static SCALE_OVERRIDE: OnceLock<Option<bool>> = OnceLock::new();
 static AXIS0_ENABLED: OnceLock<bool> = OnceLock::new();
+static THRESHOLDS: OnceLock<BlasThresholds> = OnceLock::new();
 
 pub fn current_backend() -> &'static dyn BlasProvider {
     BACKEND.get_or_init(select_backend).as_ref()
@@ -151,6 +158,131 @@ pub fn axis0_enabled() -> bool {
             .or_else(|| env_list_flag("RAPTORS_BLAS_OPS", "axis0"))
             .unwrap_or_else(|| backend_name() != "none")
     })
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BlasOp {
+    Scale,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ScaleThreshold {
+    #[serde(default = "default_true")]
+    enabled: bool,
+    #[serde(default)]
+    min_len: Option<usize>,
+    #[serde(default)]
+    min_rows: Option<usize>,
+    #[serde(default)]
+    min_cols: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BlasThresholds {
+    #[serde(default)]
+    scale: HashMap<String, ScaleThreshold>,
+}
+
+impl Default for BlasThresholds {
+    fn default() -> Self {
+        let mut scale = HashMap::new();
+        scale.insert(
+            "float32".to_string(),
+            ScaleThreshold::default_for_dtype("float32"),
+        );
+        scale.insert(
+            "float64".to_string(),
+            ScaleThreshold::default_for_dtype("float64"),
+        );
+        Self { scale }
+    }
+}
+
+impl BlasThresholds {
+    fn with_defaults(mut self) -> Self {
+        for dtype in ["float32", "float64"] {
+            self.scale
+                .entry(dtype.to_string())
+                .or_insert_with(|| ScaleThreshold::default_for_dtype(dtype));
+        }
+        self
+    }
+
+    fn scale_for(&self, dtype: &str) -> ScaleThreshold {
+        self.scale
+            .get(dtype)
+            .cloned()
+            .unwrap_or_else(|| ScaleThreshold::default_for_dtype(dtype))
+    }
+}
+
+impl ScaleThreshold {
+    fn default_for_dtype(_dtype: &str) -> Self {
+        Self {
+            enabled: true,
+            min_len: Some(SCALE_BLAS_MIN_LEN),
+            min_rows: Some(SCALE_BLAS_MIN_ROWS),
+            min_cols: Some(SCALE_BLAS_MIN_COLS),
+        }
+    }
+
+    fn should_use(&self, len: usize, rows: usize, cols: usize) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        if let Some(min) = self.min_len {
+            if len < min {
+                return false;
+            }
+        }
+        if let Some(min) = self.min_rows {
+            if rows < min {
+                return false;
+            }
+        }
+        if let Some(min) = self.min_cols {
+            if cols < min {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn thresholds() -> &'static BlasThresholds {
+    THRESHOLDS.get_or_init(load_thresholds)
+}
+
+fn load_thresholds() -> BlasThresholds {
+    let path = env::var("RAPTORS_BLAS_THRESHOLDS").ok();
+    if let Some(path) = path {
+        if let Ok(text) = fs::read_to_string(Path::new(&path)) {
+            if let Ok(parsed) = serde_json::from_str::<BlasThresholds>(&text) {
+                return parsed.with_defaults();
+            }
+        }
+    }
+    BlasThresholds::default()
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+pub fn should_use(
+    op: BlasOp,
+    dtype: &'static str,
+    len: usize,
+    rows: usize,
+    cols: usize,
+    force: bool,
+) -> bool {
+    if force {
+        return true;
+    }
+    match op {
+        BlasOp::Scale => thresholds().scale_for(dtype).should_use(len, rows, cols),
+    }
 }
 
 fn env_flag(name: &str) -> Option<bool> {

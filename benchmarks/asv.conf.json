@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "project": "raptors",
+  "project_url": "https://github.com/eddiethedean/rapto-rs",
+  "repo": "..",
+  "benchmark_dir": "raptors_suite",
+  "env_dir": ".asv/env",
+  "results_dir": ".asv/results",
+  "html_dir": ".asv/html",
+  "environment_type": "existing",
+  "matrix": {
+    "python": ["../.venv/bin/python"],
+    "env_name": ["dev"]
+  },
+  "install_command": [],
+  "show_commit_url": "https://github.com/eddiethedean/rapto-rs/commit/",
+  "build_cache_size": 4,
+  "timeout": 120
+}
+
