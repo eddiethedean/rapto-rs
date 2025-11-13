@@ -131,15 +131,18 @@ PYO3_PYTHON_BIN="${DEFAULT_VENV}/bin/python" \
 echo
 echo "== Running run_all_benchmarks.sh =="
 RUN_ALL_CHECKS_SKIP_VALIDATE="${RUN_ALL_CHECKS_SKIP_VALIDATE:-0}"
+declare -a BENCHMARK_ARGS=()
 if [[ "${RUN_ALL_CHECKS_SKIP_VALIDATE}" == "1" ]]; then
   BENCHMARK_ARGS=(--skip-validate)
   echo "== NOTE: Passing --skip-validate to run_all_benchmarks.sh (RUN_ALL_CHECKS_SKIP_VALIDATE=1)"
-else
-  BENCHMARK_ARGS=()
 fi
-SKIP_MATURIN=1 \
-PYTHON_BIN="${DEFAULT_VENV}/bin/python" \
-"${ROOT_DIR}/scripts/run_all_benchmarks.sh" "${BENCHMARK_ARGS[@]}"
+if (( ${#BENCHMARK_ARGS[@]} )); then
+  SKIP_MATURIN=1 PYTHON_BIN="${DEFAULT_VENV}/bin/python" \
+    "${ROOT_DIR}/scripts/run_all_benchmarks.sh" "${BENCHMARK_ARGS[@]}"
+else
+  SKIP_MATURIN=1 PYTHON_BIN="${DEFAULT_VENV}/bin/python" \
+    "${ROOT_DIR}/scripts/run_all_benchmarks.sh"
+fi
 
 echo
 echo "All tests and benchmarks completed successfully."
