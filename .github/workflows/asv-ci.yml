@@ -1,0 +1,138 @@
+name: ASV Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  RAPTORS_THREADS: "10"
+  PYTHONPATH: "python"
+  RAPTORS_SIMD: "auto"
+
+jobs:
+  asv-benchmarks:
+    name: ASV (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify toolchain versions
+        run: |
+          python --version
+          rustc --version
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install asv maturin numpy
+
+      - name: Build Raptors extension
+        run: maturin develop --release
+
+      - name: Set up ASV machine info (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: benchmarks
+        run: |
+          python -m asv machine --yes || echo "Note: ASV machine setup completed"
+        env:
+          PYTHONPATH: ${{ github.workspace }}/python
+
+      - name: Set up ASV machine info (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: benchmarks
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "${{ github.workspace }}\python"
+          python -m asv machine --yes
+        env:
+          PYTHONPATH: ${{ github.workspace }}\python
+
+      - name: Run ASV quick benchmarks (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: benchmarks
+        run: |
+          python -m asv run --python=same --quick --show-stderr
+        env:
+          RAPTORS_THREADS: "10"
+          PYTHONPATH: ${{ github.workspace }}/python
+          RAPTORS_SIMD: "auto"
+
+      - name: Run ASV quick benchmarks (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: benchmarks
+        shell: pwsh
+        run: |
+          $env:RAPTORS_THREADS = "10"
+          $env:PYTHONPATH = "${{ github.workspace }}\python"
+          $env:RAPTORS_SIMD = "auto"
+          python -m asv run --python=same --quick --show-stderr
+        env:
+          RAPTORS_THREADS: "10"
+          PYTHONPATH: ${{ github.workspace }}\python
+          RAPTORS_SIMD: "auto"
+
+      - name: Publish ASV HTML reports (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: benchmarks
+        run: |
+          python -m asv publish || echo "Note: ASV publish may have warnings"
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}/python
+
+      - name: Publish ASV HTML reports (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: benchmarks
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "${{ github.workspace }}\python"
+          python -m asv publish || echo "Note: ASV publish may have warnings"
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}\python
+
+      - name: Show ASV results summary (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: benchmarks
+        run: |
+          python -m asv show | head -50 || echo "Note: ASV show may have warnings"
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}/python
+
+      - name: Show ASV results summary (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: benchmarks
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "${{ github.workspace }}\python"
+          python -m asv show | Select-Object -First 50
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}\python
+
+      - name: Upload ASV results
+        uses: actions/upload-artifact@v4
+        with:
+          name: asv-results-${{ matrix.os }}
+          path: |
+            benchmarks/.asv/results
+            benchmarks/.asv/html
+          if-no-files-found: warn
+          retention-days: 30
+
