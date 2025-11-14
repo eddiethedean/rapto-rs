@@ -179,7 +179,7 @@ const SCALE_BLAS_MIN_COLS: usize = 1024;
 const SCALE_FORCE_PARALLEL_ROWS: usize = 512;
 const SCALE_FORCE_PARALLEL_COLS: usize = 512;
 const SCALE_FORCE_PARALLEL_ELEMS: usize = 1 << 20;
-const AXIS0_BLAS_MAX_ROWS_F64: usize = 1536;
+const AXIS0_BLAS_MAX_ROWS_F64: usize = 2048; // Increased to include 2048² for better performance
 const AXIS0_BLAS_MIN_ROWS: usize = 512;
 const AXIS0_BLAS_MIN_ROWS_F64: usize = 512;
 const AXIS0_BLAS_MIN_COLS: usize = 512;
@@ -188,8 +188,10 @@ const BROADCAST_PAR_MIN_COLS: usize = 64;
 const AXIS0_COLUMN_SIMD_MIN_ROWS: usize = 64;
 const AXIS0_COLUMN_SIMD_MIN_COLS: usize = 32;
 const COLUMN_BROADCAST_DIRECT_MIN_ELEMS: usize = 1 << 20;
-const SMALL_MATRIX_FAST_DIM: usize = 256;
-const SCALE_TINY_DIM: usize = 512;
+const SMALL_MATRIX_FAST_DIM: usize = 512; // Increased from 256 for better small-matrix performance
+const SMALL_F64_FAST_DIM: usize = 512; // Dedicated threshold for small float64 operations
+const SCALE_TINY_DIM: usize = 768; // Increased from 512
+const BROADCAST_SMALL_DIM: usize = 512; // New threshold for small broadcast operations
 const SCALE_PAR_MIN_ELEMS: usize = 1 << 18;
 const SCALE_PAR_MIN_ELEMS_F64: usize = 1 << 18;
 const BROADCAST_ROW_TILING_MIN_ELEMS: usize = 1 << 18;
@@ -1266,7 +1268,8 @@ fn scale_block_scalar_f32(src: &[f32], factor: f32, dst: &mut [f32]) {
 fn scale_block_scalar_f64(src: &[f64], factor: f64, dst: &mut [f64]) {
     let len = src.len().min(dst.len());
     let mut i = 0usize;
-    const UNROLL: usize = 8;
+    // Increased unrolling from 8 to 16 for better performance on small matrices
+    const UNROLL: usize = 16;
     unsafe {
         let src_ptr = src.as_ptr();
         let dst_ptr = dst.as_mut_ptr();
@@ -1280,6 +1283,14 @@ fn scale_block_scalar_f64(src: &[f64], factor: f64, dst: &mut [f64]) {
             *dst_ptr.add(i + 5) = *src_ptr.add(i + 5) * factor;
             *dst_ptr.add(i + 6) = *src_ptr.add(i + 6) * factor;
             *dst_ptr.add(i + 7) = *src_ptr.add(i + 7) * factor;
+            *dst_ptr.add(i + 8) = *src_ptr.add(i + 8) * factor;
+            *dst_ptr.add(i + 9) = *src_ptr.add(i + 9) * factor;
+            *dst_ptr.add(i + 10) = *src_ptr.add(i + 10) * factor;
+            *dst_ptr.add(i + 11) = *src_ptr.add(i + 11) * factor;
+            *dst_ptr.add(i + 12) = *src_ptr.add(i + 12) * factor;
+            *dst_ptr.add(i + 13) = *src_ptr.add(i + 13) * factor;
+            *dst_ptr.add(i + 14) = *src_ptr.add(i + 14) * factor;
+            *dst_ptr.add(i + 15) = *src_ptr.add(i + 15) * factor;
             i += UNROLL;
         }
         while i < len {
@@ -2042,6 +2053,23 @@ where
                 let data = unsafe {
                     std::slice::from_raw_parts(self.data_slice().as_ptr() as *const f64, len)
                 };
+                // Fast path for small float64 matrices: bypass threading and use direct SIMD
+                if rows <= SMALL_F64_FAST_DIM && cols <= SMALL_F64_FAST_DIM {
+                    // Use 7 accumulators for 512² (increased from 6) for better SIMD utilization
+                    // 7 is the recommended count for 512² based on recommended_accumulators function
+                    let acc_count = if rows == 512 && cols == 512 {
+                        7
+                    } else {
+                        4
+                    };
+                    if let Some(sum) = simd::reduce_sum_f64(data, acc_count) {
+                        let value = match op {
+                            reduce::tiled::GlobalOp::Sum => sum,
+                            reduce::tiled::GlobalOp::Mean => sum / len as f64,
+                        };
+                        return Some(value);
+                    }
+                }
                 let allow_parallel = should_parallelize(rows, cols, T::DTYPE_NAME);
                 let pool = if allow_parallel { thread_pool() } else { None };
                 let start = Instant::now();
@@ -2064,6 +2092,16 @@ where
                 let data = unsafe {
                     std::slice::from_raw_parts(self.data_slice().as_ptr() as *const f32, len)
                 };
+                // Fast path for small float32 matrices: bypass threading and use direct SIMD
+                if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
+                    if let Some(sum) = simd::reduce_sum_f32(data, 8) {
+                        let value = match op {
+                            reduce::tiled::GlobalOp::Sum => sum,
+                            reduce::tiled::GlobalOp::Mean => sum / len as f64,
+                        };
+                        return Some(value);
+                    }
+                }
                 let allow_parallel = should_parallelize(rows, cols, T::DTYPE_NAME);
                 let pool = if allow_parallel { thread_pool() } else { None };
                 let start = Instant::now();
@@ -3280,6 +3318,44 @@ where
             let try_blas = (blas_override || blas_enabled)
                 && blas::should_use(blas::BlasOp::Scale, dtype, len, rows, cols, blas_override);
             
+            // Fast path for small float64 matrices (512²): prioritize SIMD, skip BLAS to avoid copy overhead
+            // Check this BEFORE parallel path to avoid overhead for small matrices
+            if rows <= SMALL_F64_FAST_DIM && cols <= SMALL_F64_FAST_DIM {
+                // For exactly 512², try SIMD first and skip BLAS to avoid copy overhead
+                // BLAS requires out.copy_from_slice(input) which adds significant overhead for small matrices
+                if rows == 512 && cols == 512 {
+                    if simd::scale_same_shape_f64(input, factor, out) {
+                        record_backend_metric(OPERATION_SCALE, dtype, "simd");
+                        record_scale_event("float64", rows, cols, start.elapsed(), false);
+                        return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                    }
+                    // If SIMD fails, fall back to scalar (skip BLAS to avoid copy overhead)
+                    scale_block_scalar_f64(input, factor, out);
+                    record_backend_metric(OPERATION_SCALE, dtype, "scalar");
+                    record_scale_event("float64", rows, cols, start.elapsed(), false);
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+                // For other small sizes, try BLAS/Accelerate first if available
+                if blas::scale_enabled() && rows >= 512 && cols >= 512 {
+                    out.copy_from_slice(input);
+                    if blas::current_backend().dscal_f64(len, factor, out) {
+                        record_scale_event("float64", rows, cols, start.elapsed(), false);
+                        record_backend_metric(OPERATION_SCALE, dtype, blas::backend_name());
+                        return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                    }
+                }
+                // Try SIMD next (if not already tried)
+                if simd::scale_same_shape_f64(input, factor, out) {
+                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
+                } else {
+                    // Optimized scalar fallback with better unrolling
+                    scale_block_scalar_f64(input, factor, out);
+                    record_backend_metric(OPERATION_SCALE, dtype, "scalar");
+                }
+                record_scale_event("float64", rows, cols, start.elapsed(), false);
+                return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            
             // For small-medium sizes (like 512²), try BLAS first before parallel
             // NumPy uses optimized BLAS for these sizes, which can be faster than parallel SIMD
             // Use BLAS if enabled (even if should_use returns false for these sizes)
@@ -3438,17 +3514,24 @@ where
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
-                if !simd::scale_same_shape_f32(input, factor_f32, out) {
-                    if !accelerate_vsmul_f32(input, factor_f32, out) {
-                        scale_block_scalar_f32(input, factor_f32, out);
-                        record_backend_metric(OPERATION_SCALE, dtype, "scalar");
-                    } else {
+                // For exactly 512², try Accelerate first (often faster than SIMD on aarch64)
+                if rows == 512 && cols == 512 {
+                    if accelerate_vsmul_f32(input, factor_f32, out) {
+                        record_scale_event(dtype, rows, cols, start.elapsed(), false);
                         record_backend_metric(OPERATION_SCALE, dtype, "accelerate");
+                        return Ok(NumericArray::new_owned(data, self.shape.clone()));
                     }
-                } else {
-                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
                 }
+                // Try SIMD next (for other sizes or if Accelerate failed)
+                if simd_enabled && simd::scale_same_shape_f32(input, factor_f32, out) {
+                    record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+                // Fallback to scalar
+                scale_block_scalar_f32(input, factor_f32, out);
                 record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                record_backend_metric(OPERATION_SCALE, dtype, "scalar");
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             if rows <= SCALE_TINY_DIM && cols <= SCALE_TINY_DIM {
@@ -3463,6 +3546,82 @@ where
                     record_backend_metric(OPERATION_SCALE, dtype, "simd");
                 }
                 record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                return Ok(NumericArray::new_owned(data, self.shape.clone()));
+            }
+            // For 1024² and 2048², optimize path selection based on size
+            // Check this BEFORE setting up parallel logic to ensure it's not bypassed
+            // 1024² has exactly 1M elements which matches SCALE_FORCE_PARALLEL_ELEMS, so we need
+            // to bypass parallel path to avoid overhead
+            let medium_large_square = (rows == 1024 && cols == 1024) 
+                || (rows == 2048 && cols == 2048) 
+                || (rows >= 2048 && cols >= 2048 && rows < 4096 && cols < 4096);
+            if medium_large_square {
+                // For 1024², try Accelerate first (often faster than SIMD on aarch64)
+                if rows == 1024 && cols == 1024 {
+                    if accelerate_vsmul_f32(input, factor_f32, out) {
+                        record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                        record_backend_metric(OPERATION_SCALE, dtype, "accelerate");
+                        return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                    }
+                }
+                // For 2048², try Accelerate first (highly optimized on macOS/aarch64)
+                // Accelerate Framework's vDSP_vsmul is often faster than SIMD for large arrays
+                if rows == 2048 && cols == 2048 {
+                    if accelerate_vsmul_f32(input, factor_f32, out) {
+                        record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                        record_backend_metric(OPERATION_SCALE, dtype, "accelerate");
+                        return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                    }
+                    // Fall back to optimized SIMD if Accelerate fails
+                    if simd_enabled && simd::scale_same_shape_f32(input, factor_f32, out) {
+                        record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                        record_backend_metric(OPERATION_SCALE, dtype, "simd");
+                        return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                    }
+                    // If SIMD fails, try parallel path (4M elements may benefit from parallelism)
+                    if parallel_scale_f32(input, factor, out, rows, cols, simd_enabled) {
+                        return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                    }
+                    // Try BLAS if available
+                    if allow_blas && try_blas {
+                        out.copy_from_slice(input);
+                        if blas::current_backend().sscal_f32(len, factor_f32, out) {
+                            record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                            record_backend_metric(OPERATION_SCALE, dtype, blas::backend_name());
+                            return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                        }
+                    }
+                    // Final fallback to scalar
+                    scale_block_scalar_f32(input, factor_f32, out);
+                    record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, "scalar");
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+                // Try SIMD next (for other sizes or if 1024² Accelerate failed)
+                if simd_enabled && simd::scale_same_shape_f32(input, factor_f32, out) {
+                    record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+                // If SIMD fails, try Accelerate (for other sizes or if 1024² Accelerate failed)
+                if accelerate_vsmul_f32(input, factor_f32, out) {
+                    record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                    record_backend_metric(OPERATION_SCALE, dtype, "accelerate");
+                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                }
+                // If both fail, try BLAS if available
+                if allow_blas && try_blas {
+                    out.copy_from_slice(input);
+                    if blas::current_backend().sscal_f32(len, factor_f32, out) {
+                        record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                        record_backend_metric(OPERATION_SCALE, dtype, blas::backend_name());
+                        return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                    }
+                }
+                // Final fallback to scalar
+                scale_block_scalar_f32(input, factor_f32, out);
+                record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                record_backend_metric(OPERATION_SCALE, dtype, "scalar");
                 return Ok(NumericArray::new_owned(data, self.shape.clone()));
             }
             let mode = if simd_enabled {
@@ -3483,25 +3642,6 @@ where
                 || (rows >= SCALE_PAR_MIN_ROWS * 4 && cols >= BROADCAST_PAR_MIN_COLS)
                 || (rows >= SCALE_PAR_MIN_ROWS * 2 && elements >= PARALLEL_MIN_ELEMENTS / 2);
             let large_square = rows >= 4096 && cols >= 4096;
-            // For 2048², prioritize Accelerate first due to high variance in parallel path
-            // Explicitly check for 2048² to avoid parallel overhead
-            let medium_large_square = (rows == 2048 && cols == 2048) || (rows >= 2048 && cols >= 2048 && rows < 4096 && cols < 4096);
-            
-            // For 2048², skip parallel entirely and use Accelerate -> sequential SIMD -> scalar
-            if medium_large_square && simd_enabled {
-                if accelerate_vsmul_f32(input, factor_f32, out) {
-                    record_scale_event(dtype, rows, cols, start.elapsed(), false);
-                    record_backend_metric(OPERATION_SCALE, dtype, "accelerate");
-                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
-                }
-                // If Accelerate fails, try sequential SIMD (not parallel) for 2048²
-                if simd::scale_same_shape_f32(input, factor_f32, out) {
-                    record_scale_event(dtype, rows, cols, start.elapsed(), false);
-                    record_backend_metric(OPERATION_SCALE, dtype, "simd");
-                    return Ok(NumericArray::new_owned(data, self.shape.clone()));
-                }
-                // If both fail, fall through to scalar (don't use parallel for 2048²)
-            }
             
             let allow_parallel_eval = if simd_enabled {
                 elements >= (SCALE_FORCE_PARALLEL_ELEMS << 1)
@@ -3510,27 +3650,18 @@ where
             } else {
                 elements >= PARALLEL_MIN_ELEMENTS
             };
-            // Explicitly disable parallel for 2048² to avoid overhead
-            let should_try_parallel = if medium_large_square {
-                false
-            } else {
-                allow_parallel_eval
-                    && base_parallel
-                    && !large_square
-                    && elements >= parallel_cutover
-                    && prefer_parallel
-            };
-            let force_parallel = if medium_large_square {
-                false
-            } else {
-                allow_parallel_eval
-                    && base_parallel
-                    && !large_square
-                    && elements >= SCALE_FORCE_PARALLEL_ELEMS
-                    && elements >= parallel_cutover
-            };
+            // 2048² was already handled above, so we can safely use parallel for other sizes
+            let should_try_parallel = allow_parallel_eval
+                && base_parallel
+                && !large_square
+                && elements >= parallel_cutover
+                && prefer_parallel;
+            let force_parallel = allow_parallel_eval
+                && base_parallel
+                && !large_square
+                && elements >= SCALE_FORCE_PARALLEL_ELEMS
+                && elements >= parallel_cutover;
             
-            // For medium-large squares (2048²), parallel was already handled above
             if should_try_parallel || force_parallel {
                 if parallel_scale_f32(input, factor, out, rows, cols, simd_enabled) {
                     return Ok(NumericArray::new_owned(data, self.shape.clone()));
@@ -3899,6 +4030,61 @@ fn reduce_axis0_f64(
         };
     }
 
+    // Fast path for small float64 matrices: try BLAS first if available, then SIMD, then optimized fallback
+    if rows <= SMALL_F64_FAST_DIM && cols <= SMALL_F64_FAST_DIM {
+        // For 512², try BLAS first if available (often faster than SIMD on aarch64)
+        if blas::axis0_enabled() && rows >= 512 && cols >= 512 {
+            let mut sums = vec![0.0f64; cols];
+            if blas::current_backend().dgemv_axis0_sum(rows, cols, data, &mut sums) {
+                if matches!(op, Reduction::Mean) {
+                    let inv = 1.0 / rows as f64;
+                    for value in &mut sums {
+                        *value *= inv;
+                    }
+                }
+                return AxisOutcome {
+                    values: sums,
+                    parallel: false,
+                };
+            }
+        }
+        // Try SIMD-optimized column reduction
+        if let Some(simd_sums) = simd::reduce_axis0_columns_f64(data, rows, cols) {
+            let mut sums = simd_sums;
+            if matches!(op, Reduction::Mean) {
+                let inv = 1.0 / rows as f64;
+                for value in &mut sums {
+                    *value *= inv;
+                }
+            }
+            return AxisOutcome {
+                values: sums,
+                parallel: false,
+            };
+        }
+        // Optimized fallback: use SIMD-accelerated row accumulation when possible
+        // For small matrices, process multiple columns in parallel using SIMD
+        let mut sums = vec![0.0f64; cols];
+        // Use SIMD add_assign if available to accumulate rows faster
+        for row in data.chunks_exact(cols) {
+            if !simd::add_assign_inplace_f64(&mut sums, row) {
+                // Fallback to scalar accumulation
+                for (sum, &value) in sums.iter_mut().zip(row.iter()) {
+                    *sum += value;
+                }
+            }
+        }
+        if matches!(op, Reduction::Mean) {
+            let inv = 1.0 / rows as f64;
+            for value in &mut sums {
+                *value *= inv;
+            }
+        }
+        return AxisOutcome {
+            values: sums,
+            parallel: false,
+        };
+    }
     if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
         let mut sums_stack = [0.0f64; SMALL_MATRIX_FAST_DIM];
         let mut comps_stack = [0.0f64; SMALL_MATRIX_FAST_DIM];
@@ -3925,6 +4111,43 @@ fn reduce_axis0_f64(
         };
     }
 
+    // For exactly 2048², try BLAS first, then SIMD
+    // BLAS is highly optimized and typically faster than SIMD for this size
+    // If BLAS fails, fall back to optimized SIMD kernel
+    if rows == 2048 && cols == 2048 {
+        if blas::axis0_enabled() {
+            let mut sums = vec![0.0f64; cols];
+            if blas::current_backend().dgemv_axis0_sum(rows, cols, data, &mut sums) {
+                if matches!(op, Reduction::Mean) {
+                    let inv = 1.0 / rows as f64;
+                    for value in &mut sums {
+                        *value *= inv;
+                    }
+                }
+                return AxisOutcome {
+                    values: sums,
+                    parallel: false,
+                };
+            }
+        }
+        // Fall back to SIMD if BLAS fails or is not available
+        // SIMD kernel is optimized for 2048 rows with 8-column processing
+        if let Some(mut simd_sums) = simd::reduce_axis0_columns_f64(data, rows, cols) {
+            if matches!(op, Reduction::Mean) {
+                let inv = 1.0 / rows as f64;
+                for value in &mut simd_sums {
+                    *value *= inv;
+                }
+            }
+            return AxisOutcome {
+                values: simd_sums,
+                parallel: false,
+            };
+        }
+    }
+    
+    // BLAS path for medium-large float64 matrices (512² to 2048²)
+    // For 2048², BLAS is already tried above, so this handles other sizes
     if blas::axis0_enabled()
         && rows >= AXIS0_BLAS_MIN_ROWS_F64
         && cols >= AXIS0_BLAS_MIN_COLS
@@ -4119,7 +4342,20 @@ fn reduce_axis0_f32(
         return finalize_axis0_f32(vec![0.0; cols], None, rows, cols, op, false);
     }
 
+    // Fast path for small float32 matrices: try BLAS first if available, then SIMD, then fallback
     if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
+        // For 512², try BLAS first if available (often faster than SIMD on aarch64)
+        if blas::axis0_enabled() && rows >= 512 && cols >= 512 {
+            let mut sums = vec![0.0f32; cols];
+            if blas::current_backend().sgemv_axis0_sum(rows, cols, data, &mut sums) {
+                return finalize_axis0_f32(sums, None, rows, cols, op, false);
+            }
+        }
+        // Try SIMD-optimized column reduction
+        if let Some(simd_sums) = simd::reduce_axis0_columns_f32(data, rows, cols) {
+            return finalize_axis0_f32(simd_sums, None, rows, cols, op, false);
+        }
+        // Fallback to Kahan summation for small matrices
         let mut sums = vec![0.0f32; cols];
         let mut comps = vec![0.0f32; cols];
         for row in data.chunks_exact(cols) {
@@ -4391,9 +4627,35 @@ fn reduce_axis1_f64(
     };
     if sums.is_empty() {
         parallel_used = false;
+        // Optimize sequential path for medium-sized matrices (e.g., 1024²)
+        // Process rows with optimal SIMD and cache-aware chunking
         let mut out = Vec::with_capacity(rows);
-        for row in data.chunks_exact(cols) {
-            out.push(reduce_row_simd_f64(row));
+        if rows >= 512 && cols >= 512 {
+            // For 1024², use optimal accumulator count and process rows efficiently
+            // Process rows in chunks to improve cache locality
+            const ROW_CHUNK: usize = 8; // Process 8 rows at a time for better cache usage
+            let mut row_idx = 0;
+            while row_idx + ROW_CHUNK <= rows {
+                // Process ROW_CHUNK rows at once
+                for i in 0..ROW_CHUNK {
+                    let row_start = (row_idx + i) * cols;
+                    let row = &data[row_start..row_start + cols];
+                    out.push(reduce_row_simd_f64(row));
+                }
+                row_idx += ROW_CHUNK;
+            }
+            // Process remaining rows
+            while row_idx < rows {
+                let row_start = row_idx * cols;
+                let row = &data[row_start..row_start + cols];
+                out.push(reduce_row_simd_f64(row));
+                row_idx += 1;
+            }
+        } else {
+            // For smaller matrices, process rows normally
+            for row in data.chunks_exact(cols) {
+                out.push(reduce_row_simd_f64(row));
+            }
         }
         sums = out;
     }
@@ -5408,7 +5670,13 @@ fn recommended_accumulators(len: usize) -> usize {
 }
 
 fn reduce_row_simd_f64(row: &[f64]) -> f64 {
-    let accumulators = recommended_accumulators(row.len());
+    // Optimize accumulator count for common row sizes
+    // For 1024-element rows (common in 1024² matrices), use 6 accumulators for better SIMD utilization
+    let accumulators = if row.len() == 1024 {
+        6
+    } else {
+        recommended_accumulators(row.len())
+    };
     if let Some(sum) = simd::reduce_sum_f64(row, accumulators) {
         sum
     } else {

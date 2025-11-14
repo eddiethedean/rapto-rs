@@ -127,3 +127,34 @@ pub fn lanes_f64() -> usize {
 pub fn prefetched_rows() -> usize {
     backend().prefetched_rows.max(1)
 }
+
+/// Prefetch a memory address for read access.
+/// Uses architecture-specific prefetch instructions to bring data into cache.
+#[cfg(target_arch = "x86_64")]
+#[inline]
+pub unsafe fn prefetch_read(addr: *const u8) {
+    use std::arch::x86_64::_mm_prefetch;
+    _mm_prefetch(addr as *const i8, _MM_HINT_T0);
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+pub unsafe fn prefetch_read(addr: *const u8) {
+    core::arch::asm!(
+        "prfm pldl1keep, [{addr}]",
+        addr = in(reg) addr,
+        options(readonly, nostack)
+    );
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[inline]
+pub unsafe fn prefetch_read(_addr: *const u8) {
+    // No-op for unsupported architectures
+}
+
+/// Prefetch a memory address for read access with a specific distance ahead.
+#[inline]
+pub unsafe fn prefetch_read_ahead<T>(base: *const T, distance: usize) {
+    prefetch_read((base as *const u8).add(distance * std::mem::size_of::<T>()));
+}

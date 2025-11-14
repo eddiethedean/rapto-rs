@@ -16,16 +16,43 @@ pub struct TileSpec {
 }
 
 impl TileSpec {
-    /// Heuristic tiling tuned per architecture.  Row and column blocks are
-    /// chosen to keep working sets inside L1/L2 while amortising SIMD setup.
+    /// Heuristic tiling tuned per architecture with cache-aware sizing.
+    /// Row and column blocks are chosen to keep working sets inside L1/L2
+    /// while amortising SIMD setup. Cache sizes:
+    /// - L1: ~32KB (typical) → ~4096 f64 or ~8192 f32 elements
+    /// - L2: ~256KB-1MB → larger tiles for multi-threaded work
+    /// - L3: ~8MB+ → maximize tile reuse
     pub fn for_shape(rows: usize, cols: usize) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
             if std::arch::is_x86_feature_detected!("avx512f") {
-                return Self::new(rows, cols, 8, 8, 96, 256);
+                // AVX-512: 8 f64 or 16 f32 per lane
+                // L1 cache-aware: ~512 f64 or ~1024 f32 per tile
+                let row_hint = if rows * cols >= 1 << 22 {
+                    128 // L2 cache-aware for large arrays
+                } else {
+                    96 // L1 cache-aware
+                };
+                let col_hint = if rows * cols >= 1 << 22 {
+                    512 // L2 cache-aware
+                } else {
+                    256 // L1 cache-aware (~32KB for f64)
+                };
+                return Self::new(rows, cols, 8, 8, row_hint, col_hint);
             }
             if std::arch::is_x86_feature_detected!("avx2") {
-                return Self::new(rows, cols, 4, 6, 64, 192);
+                // AVX2: 4 f64 or 8 f32 per lane
+                let row_hint = if rows * cols >= 1 << 22 {
+                    96
+                } else {
+                    64
+                };
+                let col_hint = if rows * cols >= 1 << 22 {
+                    384 // L2 cache-aware
+                } else {
+                    192 // L1 cache-aware
+                };
+                return Self::new(rows, cols, 4, 6, row_hint, col_hint);
             }
             return Self::new(rows, cols, 2, 4, 64, 160);
         }
@@ -33,7 +60,18 @@ impl TileSpec {
         #[cfg(target_arch = "aarch64")]
         {
             // Apple M-series NEON prefers 128-bit lanes, so 2-wide f64 and 4-wide f32.
-            return Self::new(rows, cols, 2, 5, 96, 192);
+            // M-series typically has 128KB L1, so we can use larger tiles
+            let row_hint = if rows * cols >= 1 << 22 {
+                128
+            } else {
+                96
+            };
+            let col_hint = if rows * cols >= 1 << 22 {
+                384
+            } else {
+                192
+            };
+            return Self::new(rows, cols, 2, 5, row_hint, col_hint);
         }
 
         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]

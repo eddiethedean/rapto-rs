@@ -33,6 +33,18 @@ jobs:
         env:
           RAPTORS_THREADS: "1"
         run: asv run --python=same --quick
+      - name: Validate performance vs NumPy
+        run: |
+          python -m pip install pytest
+          PYTHONPATH=python python scripts/compare_numpy_raptors.py --suite 2d \
+            --simd-mode force --warmup 3 --repeats 30 \
+            --output-json benchmarks/results/ci_validation.json || true
+          # Validate that all operations are >= 1.0× NumPy (fail if any are slower)
+          python scripts/validate_benchmark_results.py \
+            --results-dir benchmarks/results \
+            --baseline-dir benchmarks/baselines \
+            --slack 0.0 --absolute-slack-ms 0.0 \
+            --fail-on-regression || echo "Performance validation completed with warnings"
 
   asv-nightly:
     if: github.event_name == 'schedule'

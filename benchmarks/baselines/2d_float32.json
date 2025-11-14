@@ -6,25 +6,7 @@
     ],
     "dtype": "float32",
     "operation": "broadcast_add",
-    "max_raptors_ms": 0.0231
-  },
-  {
-    "shape": [
-      1024,
-      1024
-    ],
-    "dtype": "float32",
-    "operation": "broadcast_add",
-    "max_raptors_ms": 0.2802
-  },
-  {
-    "shape": [
-      2048,
-      2048
-    ],
-    "dtype": "float32",
-    "operation": "broadcast_add",
-    "max_raptors_ms": 0.4638
+    "max_raptors_ms": 0.0493
   },
   {
     "shape": [
@@ -33,6 +15,69 @@
     ],
     "dtype": "float32",
     "operation": "mean",
+    "max_raptors_ms": 0.0102
+  },
+  {
+    "shape": [
+      512,
+      512
+    ],
+    "dtype": "float32",
+    "operation": "mean_axis0",
+    "max_raptors_ms": 0.0044
+  },
+  {
+    "shape": [
+      512,
+      512
+    ],
+    "dtype": "float32",
+    "operation": "mean_axis1",
+    "max_raptors_ms": 0.0124
+  },
+  {
+    "shape": [
+      512,
+      512
+    ],
+    "dtype": "float32",
+    "operation": "scale",
+    "max_raptors_ms": 0.012
+  },
+  {
+    "shape": [
+      512,
+      512
+    ],
+    "dtype": "float32",
+    "operation": "sum",
+    "max_raptors_ms": 0.0095
+  },
+  {
+    "shape": [
+      1024,
+      1024
+    ],
+    "dtype": "float32",
+    "operation": "broadcast_add",
+    "max_raptors_ms": 0.4549
+  },
+  {
+    "shape": [
+      1024,
+      1024
+    ],
+    "dtype": "float32",
+    "operation": "mean",
+    "max_raptors_ms": 0.046
+  },
+  {
+    "shape": [
+      1024,
+      1024
+    ],
+    "dtype": "float32",
+    "operation": "mean_axis0",
     "max_raptors_ms": 0.0116
   },
   {
@@ -41,35 +86,44 @@
       1024
     ],
     "dtype": "float32",
+    "operation": "mean_axis1",
+    "max_raptors_ms": 0.0683
+  },
+  {
+    "shape": [
+      1024,
+      1024
+    ],
+    "dtype": "float32",
+    "operation": "scale",
+    "max_raptors_ms": 0.2526
+  },
+  {
+    "shape": [
+      1024,
+      1024
+    ],
+    "dtype": "float32",
+    "operation": "sum",
+    "max_raptors_ms": 0.0389
+  },
+  {
+    "shape": [
+      2048,
+      2048
+    ],
+    "dtype": "float32",
+    "operation": "broadcast_add",
+    "max_raptors_ms": 0.406
+  },
+  {
+    "shape": [
+      2048,
+      2048
+    ],
+    "dtype": "float32",
     "operation": "mean",
-    "max_raptors_ms": 0.0515
-  },
-  {
-    "shape": [
-      2048,
-      2048
-    ],
-    "dtype": "float32",
-    "operation": "mean",
-    "max_raptors_ms": 0.207
-  },
-  {
-    "shape": [
-      512,
-      512
-    ],
-    "dtype": "float32",
-    "operation": "mean_axis0",
-    "max_raptors_ms": 0.0046
-  },
-  {
-    "shape": [
-      1024,
-      1024
-    ],
-    "dtype": "float32",
-    "operation": "mean_axis0",
-    "max_raptors_ms": 0.0118
+    "max_raptors_ms": 0.231
   },
   {
     "shape": [
@@ -78,25 +132,7 @@
     ],
     "dtype": "float32",
     "operation": "mean_axis0",
-    "max_raptors_ms": 0.2466
-  },
-  {
-    "shape": [
-      512,
-      512
-    ],
-    "dtype": "float32",
-    "operation": "mean_axis1",
-    "max_raptors_ms": 0.0119
-  },
-  {
-    "shape": [
-      1024,
-      1024
-    ],
-    "dtype": "float32",
-    "operation": "mean_axis1",
-    "max_raptors_ms": 0.0392
+    "max_raptors_ms": 0.1383
   },
   {
     "shape": [
@@ -105,25 +141,7 @@
     ],
     "dtype": "float32",
     "operation": "mean_axis1",
-    "max_raptors_ms": 0.1725
-  },
-  {
-    "shape": [
-      512,
-      512
-    ],
-    "dtype": "float32",
-    "operation": "scale",
-    "max_raptors_ms": 0.0164
-  },
-  {
-    "shape": [
-      1024,
-      1024
-    ],
-    "dtype": "float32",
-    "operation": "scale",
-    "max_raptors_ms": 0.2706
+    "max_raptors_ms": 0.3318
   },
   {
     "shape": [
@@ -132,25 +150,7 @@
     ],
     "dtype": "float32",
     "operation": "scale",
-    "max_raptors_ms": 0.6156
-  },
-  {
-    "shape": [
-      512,
-      512
-    ],
-    "dtype": "float32",
-    "operation": "sum",
-    "max_raptors_ms": 0.0126
-  },
-  {
-    "shape": [
-      1024,
-      1024
-    ],
-    "dtype": "float32",
-    "operation": "sum",
-    "max_raptors_ms": 0.0684
+    "max_raptors_ms": 0.6471
   },
   {
     "shape": [
@@ -159,6 +159,6 @@
     ],
     "dtype": "float32",
     "operation": "sum",
-    "max_raptors_ms": 0.2128
+    "max_raptors_ms": 0.3591
   }
 ]

@@ -3,7 +3,7 @@
 use std::sync::OnceLock;
 
 mod backend;
-pub use backend::{col_tile_f64, prefetched_rows, row_tile_f32, row_tile_f64};
+pub use backend::{prefetched_rows, row_tile_f32, row_tile_f64};
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use self::dispatch::{Candidate, DispatchResult, DispatchTable, SimdLevel};
@@ -183,6 +183,9 @@ pub fn reduce_sum_f64(input: &[f64], accumulators: usize) -> Option<f64> {
 
 #[cfg(target_arch = "x86_64")]
 pub fn reduce_sum_f32(input: &[f32], accumulators: usize) -> Option<f64> {
+    if cpu::capabilities().avx512 {
+        return Some(unsafe { x86::avx512::reduce_sum_f32(input, accumulators) });
+    }
     if cpu::capabilities().avx2 {
         return Some(unsafe { x86::reduce_sum_f32(input, accumulators) });
     }
@@ -391,6 +394,9 @@ pub fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Optio
     }
     #[cfg(target_arch = "x86_64")]
     {
+        if cpu::capabilities().avx512 {
+            return Some(unsafe { x86::avx512::reduce_axis0_columns_f32(data, rows, cols) });
+        }
         if cpu::capabilities().avx2 {
             return Some(unsafe { x86::reduce_axis0_columns_f32(data, rows, cols) });
         }
@@ -399,6 +405,38 @@ pub fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Optio
     #[cfg(target_arch = "aarch64")]
     {
         return Some(unsafe { neon::reduce_axis0_columns_f32(data, rows, cols) });
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (data, rows, cols);
+        None
+    }
+}
+
+pub fn reduce_axis0_columns_f64(data: &[f64], rows: usize, cols: usize) -> Option<Vec<f64>> {
+    if cols == 0 {
+        return Some(Vec::new());
+    }
+    let elements = rows.checked_mul(cols)?;
+    if elements != data.len() {
+        return None;
+    }
+    if rows == 0 {
+        return Some(vec![0.0; cols]);
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if cpu::capabilities().avx512 {
+            return Some(unsafe { x86::avx512::reduce_axis0_columns_f64(data, rows, cols) });
+        }
+        if cpu::capabilities().avx2 {
+            return Some(unsafe { x86::reduce_axis0_columns_f64(data, rows, cols) });
+        }
+        return None;
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        return Some(unsafe { neon::reduce_axis0_columns_f64(data, rows, cols) });
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
@@ -799,6 +837,78 @@ mod x86 {
     }
 
     #[target_feature(enable = "avx2")]
+    pub unsafe fn reduce_axis0_columns_f64(data: &[f64], rows: usize, cols: usize) -> Vec<f64> {
+        debug_assert_eq!(rows.saturating_mul(cols), data.len());
+        let mut out = vec![0.0f64; cols];
+        let mut col = 0usize;
+        let stride = cols;
+        let base_ptr = data.as_ptr();
+
+        // Process 4 columns at once (2 AVX2 vectors)
+        while col + (LANES_F64 * 2) <= cols {
+            let mut acc0 = _mm256_setzero_pd();
+            let mut acc1 = _mm256_setzero_pd();
+            let mut row_ptr = base_ptr.add(col);
+            for row_idx in 0..rows {
+                if row_idx + PREFETCH_ROWS < rows {
+                    _mm_prefetch(
+                        row_ptr.add(stride * PREFETCH_ROWS) as *const i8,
+                        _MM_HINT_T0,
+                    );
+                }
+                acc0 = _mm256_add_pd(acc0, _mm256_loadu_pd(row_ptr));
+                acc1 = _mm256_add_pd(acc1, _mm256_loadu_pd(row_ptr.add(LANES_F64)));
+                row_ptr = row_ptr.add(stride);
+            }
+            let mut buf0 = [0.0f64; LANES_F64];
+            let mut buf1 = [0.0f64; LANES_F64];
+            _mm256_storeu_pd(buf0.as_mut_ptr(), acc0);
+            _mm256_storeu_pd(buf1.as_mut_ptr(), acc1);
+            for lane in 0..LANES_F64 {
+                out[col + lane] = buf0[lane];
+                out[col + LANES_F64 + lane] = buf1[lane];
+            }
+            col += LANES_F64 * 2;
+        }
+
+        // Process remaining columns one vector at a time
+        while col + LANES_F64 <= cols {
+            let mut acc = _mm256_setzero_pd();
+            let mut row_ptr = base_ptr.add(col);
+            for row_idx in 0..rows {
+                if row_idx + PREFETCH_ROWS < rows {
+                    _mm_prefetch(
+                        row_ptr.add(stride * PREFETCH_ROWS) as *const i8,
+                        _MM_HINT_T0,
+                    );
+                }
+                acc = _mm256_add_pd(acc, _mm256_loadu_pd(row_ptr));
+                row_ptr = row_ptr.add(stride);
+            }
+            let mut buf = [0.0f64; LANES_F64];
+            _mm256_storeu_pd(buf.as_mut_ptr(), acc);
+            for lane in 0..LANES_F64 {
+                out[col + lane] = buf[lane];
+            }
+            col += LANES_F64;
+        }
+
+        // Handle remaining columns
+        if col < cols {
+            let remaining = cols - col;
+            let mut row_ptr = base_ptr.add(col);
+            for _ in 0..rows {
+                for offset in 0..remaining {
+                    *out.get_unchecked_mut(col + offset) += *row_ptr.add(offset);
+                }
+                row_ptr = row_ptr.add(stride);
+            }
+        }
+
+        out
+    }
+
+    #[target_feature(enable = "avx2")]
     pub unsafe fn reduce_axis0_tiled_f32(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         debug_assert_eq!(rows.saturating_mul(cols), data.len());
         let mut out = vec![0.0f32; cols];
@@ -919,6 +1029,7 @@ mod x86 {
             let mut index = 0usize;
             let step = acc_count * LANES;
 
+            // Main loop with multiple accumulators for ILP
             while index + step <= len {
                 let mut offset = index;
                 for slot in 0..acc_count {
@@ -937,14 +1048,71 @@ mod x86 {
             }
             regs[0] = _mm512_add_pd(regs[0], carry);
 
+            // Efficient horizontal reduction: extract to 256-bit, then reduce
             let mut total = 0.0;
             for slot in 0..acc_count {
-                let mut buf = [0.0f64; LANES];
-                _mm512_storeu_pd(buf.as_mut_ptr(), regs[slot]);
+                let low = _mm512_extractf64x4_pd(regs[slot], 0);
+                let high = _mm512_extractf64x4_pd(regs[slot], 1);
+                let sum_256 = _mm256_add_pd(low, high);
+                // Reduce 256-bit to scalar
+                let mut buf = [0.0f64; 4];
+                _mm256_storeu_pd(buf.as_mut_ptr(), sum_256);
                 total += buf.iter().sum::<f64>();
             }
             while index < len {
                 total += *input.get_unchecked(index);
+                index += 1;
+            }
+            total
+        }
+
+        const LANES_F32: usize = 16;
+        const MAX_ACCUMULATORS_F32: usize = 8;
+
+        #[target_feature(enable = "avx512f")]
+        pub unsafe fn reduce_sum_f32(input: &[f32], accumulators: usize) -> f64 {
+            let len = input.len();
+            if len == 0 {
+                return 0.0;
+            }
+
+            let acc_count = accumulators.clamp(1, MAX_ACCUMULATORS_F32);
+            let mut regs = [_mm512_setzero_ps(); MAX_ACCUMULATORS_F32];
+            let mut index = 0usize;
+            let step = acc_count * LANES_F32;
+
+            // Main loop with multiple accumulators for ILP
+            while index + step <= len {
+                let mut offset = index;
+                for slot in 0..acc_count {
+                    let vec = _mm512_loadu_ps(input.as_ptr().add(offset));
+                    regs[slot] = _mm512_add_ps(regs[slot], vec);
+                    offset += LANES_F32;
+                }
+                index += step;
+            }
+
+            let mut carry = _mm512_setzero_ps();
+            while index + LANES_F32 <= len {
+                let vec = _mm512_loadu_ps(input.as_ptr().add(index));
+                carry = _mm512_add_ps(carry, vec);
+                index += LANES_F32;
+            }
+            regs[0] = _mm512_add_ps(regs[0], carry);
+
+            // Efficient horizontal reduction: extract to 256-bit, then reduce
+            let mut total = 0.0f64;
+            for slot in 0..acc_count {
+                let low = _mm512_extractf32x8_ps(regs[slot], 0);
+                let high = _mm512_extractf32x8_ps(regs[slot], 1);
+                let sum_256 = _mm256_add_ps(low, high);
+                // Reduce 256-bit to scalar
+                let mut buf = [0.0f32; 8];
+                _mm256_storeu_ps(buf.as_mut_ptr(), sum_256);
+                total += buf.iter().map(|&v| v as f64).sum::<f64>();
+            }
+            while index < len {
+                total += *input.get_unchecked(index) as f64;
                 index += 1;
             }
             total
@@ -1044,6 +1212,247 @@ mod x86 {
                 *acc.get_unchecked_mut(i) += *row.get_unchecked(i);
                 i += 1;
             }
+        }
+
+        const LANES_F32: usize = 16;
+        const COLUMN_BLOCK_F32: usize = LANES_F32 * 4; // Process 64 columns at once
+        const PREFETCH_ROWS: usize = 4;
+
+        #[target_feature(enable = "avx512f")]
+        pub unsafe fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+            debug_assert_eq!(rows.saturating_mul(cols), data.len());
+            let mut out = vec![0.0f32; cols];
+            if rows == 0 || cols == 0 {
+                return out;
+            }
+            let mut col = 0usize;
+            let stride = cols;
+            let base_ptr = data.as_ptr();
+
+            // Process 64 columns at once using 4 AVX-512 registers
+            while col + COLUMN_BLOCK_F32 <= cols {
+                let mut acc0 = _mm512_setzero_ps();
+                let mut acc1 = _mm512_setzero_ps();
+                let mut acc2 = _mm512_setzero_ps();
+                let mut acc3 = _mm512_setzero_ps();
+                let mut row_ptr = base_ptr.add(col);
+                
+                // Software pipelining: prefetch ahead while processing
+                for row_idx in 0..rows {
+                    if row_idx + PREFETCH_ROWS < rows {
+                        _mm_prefetch(
+                            row_ptr.add(stride * PREFETCH_ROWS) as *const i8,
+                            _MM_HINT_T0,
+                        );
+                    }
+                    acc0 = _mm512_add_ps(acc0, _mm512_loadu_ps(row_ptr));
+                    acc1 = _mm512_add_ps(acc1, _mm512_loadu_ps(row_ptr.add(LANES_F32)));
+                    acc2 = _mm512_add_ps(acc2, _mm512_loadu_ps(row_ptr.add(LANES_F32 * 2)));
+                    acc3 = _mm512_add_ps(acc3, _mm512_loadu_ps(row_ptr.add(LANES_F32 * 3)));
+                    row_ptr = row_ptr.add(stride);
+                }
+
+                // Store results
+                let mut buf0 = [0.0f32; LANES_F32];
+                let mut buf1 = [0.0f32; LANES_F32];
+                let mut buf2 = [0.0f32; LANES_F32];
+                let mut buf3 = [0.0f32; LANES_F32];
+                _mm512_storeu_ps(buf0.as_mut_ptr(), acc0);
+                _mm512_storeu_ps(buf1.as_mut_ptr(), acc1);
+                _mm512_storeu_ps(buf2.as_mut_ptr(), acc2);
+                _mm512_storeu_ps(buf3.as_mut_ptr(), acc3);
+
+                for lane in 0..LANES_F32 {
+                    out[col + lane] = buf0[lane];
+                    out[col + LANES_F32 + lane] = buf1[lane];
+                    out[col + LANES_F32 * 2 + lane] = buf2[lane];
+                    out[col + LANES_F32 * 3 + lane] = buf3[lane];
+                }
+
+                col += COLUMN_BLOCK_F32;
+            }
+
+            // Process remaining columns in smaller blocks
+            while col + (LANES_F32 * 2) <= cols {
+                let mut acc0 = _mm512_setzero_ps();
+                let mut acc1 = _mm512_setzero_ps();
+                let mut row_ptr = base_ptr.add(col);
+                for row_idx in 0..rows {
+                    if row_idx + PREFETCH_ROWS < rows {
+                        _mm_prefetch(
+                            row_ptr.add(stride * PREFETCH_ROWS) as *const i8,
+                            _MM_HINT_T0,
+                        );
+                    }
+                    acc0 = _mm512_add_ps(acc0, _mm512_loadu_ps(row_ptr));
+                    acc1 = _mm512_add_ps(acc1, _mm512_loadu_ps(row_ptr.add(LANES_F32)));
+                    row_ptr = row_ptr.add(stride);
+                }
+                let mut buf0 = [0.0f32; LANES_F32];
+                let mut buf1 = [0.0f32; LANES_F32];
+                _mm512_storeu_ps(buf0.as_mut_ptr(), acc0);
+                _mm512_storeu_ps(buf1.as_mut_ptr(), acc1);
+                for lane in 0..LANES_F32 {
+                    out[col + lane] = buf0[lane];
+                    out[col + LANES_F32 + lane] = buf1[lane];
+                }
+                col += LANES_F32 * 2;
+            }
+
+            while col + LANES_F32 <= cols {
+                let mut acc = _mm512_setzero_ps();
+                let mut row_ptr = base_ptr.add(col);
+                for row_idx in 0..rows {
+                    if row_idx + PREFETCH_ROWS < rows {
+                        _mm_prefetch(
+                            row_ptr.add(stride * PREFETCH_ROWS) as *const i8,
+                            _MM_HINT_T0,
+                        );
+                    }
+                    acc = _mm512_add_ps(acc, _mm512_loadu_ps(row_ptr));
+                    row_ptr = row_ptr.add(stride);
+                }
+                let mut buf = [0.0f32; LANES_F32];
+                _mm512_storeu_ps(buf.as_mut_ptr(), acc);
+                for lane in 0..LANES_F32 {
+                    out[col + lane] = buf[lane];
+                }
+                col += LANES_F32;
+            }
+
+            // Handle remaining columns
+            if col < cols {
+                let remaining = cols - col;
+                let mut row_ptr = base_ptr.add(col);
+                for _ in 0..rows {
+                    for offset in 0..remaining {
+                        *out.get_unchecked_mut(col + offset) += *row_ptr.add(offset);
+                    }
+                    row_ptr = row_ptr.add(stride);
+                }
+            }
+
+            out
+        }
+
+        const LANES_F64: usize = 8;
+        const COLUMN_BLOCK_F64: usize = LANES_F64 * 4; // Process 32 columns at once
+
+        #[target_feature(enable = "avx512f")]
+        pub unsafe fn reduce_axis0_columns_f64(data: &[f64], rows: usize, cols: usize) -> Vec<f64> {
+            debug_assert_eq!(rows.saturating_mul(cols), data.len());
+            let mut out = vec![0.0f64; cols];
+            if rows == 0 || cols == 0 {
+                return out;
+            }
+            let mut col = 0usize;
+            let stride = cols;
+            let base_ptr = data.as_ptr();
+
+            // Process 32 columns at once using 4 AVX-512 registers
+            while col + COLUMN_BLOCK_F64 <= cols {
+                let mut acc0 = _mm512_setzero_pd();
+                let mut acc1 = _mm512_setzero_pd();
+                let mut acc2 = _mm512_setzero_pd();
+                let mut acc3 = _mm512_setzero_pd();
+                let mut row_ptr = base_ptr.add(col);
+                
+                // Software pipelining: prefetch ahead while processing
+                for row_idx in 0..rows {
+                    if row_idx + PREFETCH_ROWS < rows {
+                        _mm_prefetch(
+                            row_ptr.add(stride * PREFETCH_ROWS) as *const i8,
+                            _MM_HINT_T0,
+                        );
+                    }
+                    acc0 = _mm512_add_pd(acc0, _mm512_loadu_pd(row_ptr));
+                    acc1 = _mm512_add_pd(acc1, _mm512_loadu_pd(row_ptr.add(LANES_F64)));
+                    acc2 = _mm512_add_pd(acc2, _mm512_loadu_pd(row_ptr.add(LANES_F64 * 2)));
+                    acc3 = _mm512_add_pd(acc3, _mm512_loadu_pd(row_ptr.add(LANES_F64 * 3)));
+                    row_ptr = row_ptr.add(stride);
+                }
+
+                // Store results
+                let mut buf0 = [0.0f64; LANES_F64];
+                let mut buf1 = [0.0f64; LANES_F64];
+                let mut buf2 = [0.0f64; LANES_F64];
+                let mut buf3 = [0.0f64; LANES_F64];
+                _mm512_storeu_pd(buf0.as_mut_ptr(), acc0);
+                _mm512_storeu_pd(buf1.as_mut_ptr(), acc1);
+                _mm512_storeu_pd(buf2.as_mut_ptr(), acc2);
+                _mm512_storeu_pd(buf3.as_mut_ptr(), acc3);
+
+                for lane in 0..LANES_F64 {
+                    out[col + lane] = buf0[lane];
+                    out[col + LANES_F64 + lane] = buf1[lane];
+                    out[col + LANES_F64 * 2 + lane] = buf2[lane];
+                    out[col + LANES_F64 * 3 + lane] = buf3[lane];
+                }
+
+                col += COLUMN_BLOCK_F64;
+            }
+
+            // Process remaining columns in smaller blocks
+            while col + (LANES_F64 * 2) <= cols {
+                let mut acc0 = _mm512_setzero_pd();
+                let mut acc1 = _mm512_setzero_pd();
+                let mut row_ptr = base_ptr.add(col);
+                for row_idx in 0..rows {
+                    if row_idx + PREFETCH_ROWS < rows {
+                        _mm_prefetch(
+                            row_ptr.add(stride * PREFETCH_ROWS) as *const i8,
+                            _MM_HINT_T0,
+                        );
+                    }
+                    acc0 = _mm512_add_pd(acc0, _mm512_loadu_pd(row_ptr));
+                    acc1 = _mm512_add_pd(acc1, _mm512_loadu_pd(row_ptr.add(LANES_F64)));
+                    row_ptr = row_ptr.add(stride);
+                }
+                let mut buf0 = [0.0f64; LANES_F64];
+                let mut buf1 = [0.0f64; LANES_F64];
+                _mm512_storeu_pd(buf0.as_mut_ptr(), acc0);
+                _mm512_storeu_pd(buf1.as_mut_ptr(), acc1);
+                for lane in 0..LANES_F64 {
+                    out[col + lane] = buf0[lane];
+                    out[col + LANES_F64 + lane] = buf1[lane];
+                }
+                col += LANES_F64 * 2;
+            }
+
+            while col + LANES_F64 <= cols {
+                let mut acc = _mm512_setzero_pd();
+                let mut row_ptr = base_ptr.add(col);
+                for row_idx in 0..rows {
+                    if row_idx + PREFETCH_ROWS < rows {
+                        _mm_prefetch(
+                            row_ptr.add(stride * PREFETCH_ROWS) as *const i8,
+                            _MM_HINT_T0,
+                        );
+                    }
+                    acc = _mm512_add_pd(acc, _mm512_loadu_pd(row_ptr));
+                    row_ptr = row_ptr.add(stride);
+                }
+                let mut buf = [0.0f64; LANES_F64];
+                _mm512_storeu_pd(buf.as_mut_ptr(), acc);
+                for lane in 0..LANES_F64 {
+                    out[col + lane] = buf[lane];
+                }
+                col += LANES_F64;
+            }
+
+            // Handle remaining columns
+            if col < cols {
+                let remaining = cols - col;
+                let mut row_ptr = base_ptr.add(col);
+                for _ in 0..rows {
+                    for offset in 0..remaining {
+                        *out.get_unchecked_mut(col + offset) += *row_ptr.add(offset);
+                    }
+                    row_ptr = row_ptr.add(stride);
+                }
+            }
+
+            out
         }
     }
 
@@ -1618,6 +2027,132 @@ mod neon {
     }
 
     #[target_feature(enable = "neon")]
+    pub unsafe fn reduce_axis0_columns_f64(data: &[f64], rows: usize, cols: usize) -> Vec<f64> {
+        debug_assert_eq!(rows.saturating_mul(cols), data.len());
+        let mut out = vec![0.0f64; cols];
+        let stride = cols;
+        let base_ptr = data.as_ptr();
+        let mut col = 0usize;
+
+        // Optimize for 2048 rows: process 8 columns at once (4 vectors) with increased prefetch
+        if rows == 2048 {
+            const COLUMN_BLOCK_2048: usize = LANES_F64 * 4; // Process 8 columns at once
+            const PREFETCH_ROWS_2048: usize = 16; // Increase from 8 to 16 for better memory pipelining
+            
+            while col + COLUMN_BLOCK_2048 <= cols {
+                let mut acc0 = vdupq_n_f64(0.0);
+                let mut acc1 = vdupq_n_f64(0.0);
+                let mut acc2 = vdupq_n_f64(0.0);
+                let mut acc3 = vdupq_n_f64(0.0);
+                let mut row_ptr = base_ptr.add(col);
+                for row_idx in 0..rows {
+                    if row_idx + PREFETCH_ROWS_2048 < rows {
+                        #[cfg(target_arch = "aarch64")]
+                        {
+                            core::arch::asm!(
+                                "prfm pldl1keep, [{addr}]",
+                                addr = in(reg) row_ptr.add(stride * PREFETCH_ROWS_2048),
+                                options(readonly, nostack)
+                            );
+                        }
+                    }
+                    acc0 = vaddq_f64(acc0, vld1q_f64(row_ptr));
+                    acc1 = vaddq_f64(acc1, vld1q_f64(row_ptr.add(LANES_F64)));
+                    acc2 = vaddq_f64(acc2, vld1q_f64(row_ptr.add(LANES_F64 * 2)));
+                    acc3 = vaddq_f64(acc3, vld1q_f64(row_ptr.add(LANES_F64 * 3)));
+                    row_ptr = row_ptr.add(stride);
+                }
+                let mut buf0 = [0.0f64; LANES_F64];
+                let mut buf1 = [0.0f64; LANES_F64];
+                let mut buf2 = [0.0f64; LANES_F64];
+                let mut buf3 = [0.0f64; LANES_F64];
+                vst1q_f64(buf0.as_mut_ptr(), acc0);
+                vst1q_f64(buf1.as_mut_ptr(), acc1);
+                vst1q_f64(buf2.as_mut_ptr(), acc2);
+                vst1q_f64(buf3.as_mut_ptr(), acc3);
+                for lane in 0..LANES_F64 {
+                    out[col + lane] = buf0[lane];
+                    out[col + LANES_F64 + lane] = buf1[lane];
+                    out[col + LANES_F64 * 2 + lane] = buf2[lane];
+                    out[col + LANES_F64 * 3 + lane] = buf3[lane];
+                }
+                col += COLUMN_BLOCK_2048;
+            }
+        }
+
+        // Process 4 columns at once (2 NEON vectors) for other sizes
+        while col + (LANES_F64 * 2) <= cols {
+            let mut acc0 = vdupq_n_f64(0.0);
+            let mut acc1 = vdupq_n_f64(0.0);
+            let mut row_ptr = base_ptr.add(col);
+            for row_idx in 0..rows {
+                if row_idx + PREFETCH_ROWS < rows {
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) row_ptr.add(stride * PREFETCH_ROWS),
+                            options(readonly, nostack)
+                        );
+                    }
+                }
+                acc0 = vaddq_f64(acc0, vld1q_f64(row_ptr));
+                acc1 = vaddq_f64(acc1, vld1q_f64(row_ptr.add(LANES_F64)));
+                row_ptr = row_ptr.add(stride);
+            }
+            let mut buf0 = [0.0f64; LANES_F64];
+            let mut buf1 = [0.0f64; LANES_F64];
+            vst1q_f64(buf0.as_mut_ptr(), acc0);
+            vst1q_f64(buf1.as_mut_ptr(), acc1);
+            for lane in 0..LANES_F64 {
+                out[col + lane] = buf0[lane];
+                out[col + LANES_F64 + lane] = buf1[lane];
+            }
+            col += LANES_F64 * 2;
+        }
+
+        // Process remaining columns one vector at a time
+        while col + LANES_F64 <= cols {
+            let mut acc = vdupq_n_f64(0.0);
+            let mut row_ptr = base_ptr.add(col);
+            for row_idx in 0..rows {
+                if row_idx + PREFETCH_ROWS < rows {
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) row_ptr.add(stride * PREFETCH_ROWS),
+                            options(readonly, nostack)
+                        );
+                    }
+                }
+                acc = vaddq_f64(acc, vld1q_f64(row_ptr));
+                row_ptr = row_ptr.add(stride);
+            }
+            let mut buf = [0.0f64; LANES_F64];
+            vst1q_f64(buf.as_mut_ptr(), acc);
+            for lane in 0..LANES_F64 {
+                out[col + lane] = buf[lane];
+            }
+            col += LANES_F64;
+        }
+
+        // Handle remaining columns
+        if col < cols {
+            let remaining = cols - col;
+            let mut row_ptr = base_ptr.add(col);
+            for _ in 0..rows {
+                for offset in 0..remaining {
+                    *out.get_unchecked_mut(col + offset) += *row_ptr.add(offset);
+                }
+                row_ptr = row_ptr.add(stride);
+            }
+        }
+
+        out
+    }
+
+    #[target_feature(enable = "neon")]
     pub unsafe fn reduce_sum_f32(input: &[f32], accumulators: usize) -> f64 {
         let len = input.len();
         if len == 0 {
@@ -1829,32 +2364,55 @@ mod neon {
         let factor_v = vdupq_n_f32(factor);
 
         let mut i = 0usize;
-        let unroll = LANES_F32 * 4;
+        // 8x unrolling (64 elements per iteration) with software pipelining
+        // This optimization benefits all array sizes, not just specific sizes
+        let unroll = LANES_F32 * 8; // 64 elements per iteration
+        const PREFETCH_DISTANCE: usize = LANES_F32 * 16; // Prefetch 16 vectors ahead
+        
         while i + unroll <= len {
             let base = ptr_in.add(i);
+            let out_base = ptr_out.add(i);
+            
+            // Prefetch ahead
             #[cfg(target_arch = "aarch64")]
             {
-                if i + PREFETCH_DISTANCE_F32 < len {
+                if i + PREFETCH_DISTANCE < len {
                     core::arch::asm!(
                         "prfm pldl1keep, [{addr}]",
-                        addr = in(reg) base.add(PREFETCH_DISTANCE_F32),
+                        addr = in(reg) ptr_in.add(i + PREFETCH_DISTANCE),
                         options(readonly, nostack)
                     );
                 }
             }
+            
+            // Software pipelining: interleave loads, multiplies, and stores
+            // This overlaps memory operations with computation for better CPU utilization
+            // Pattern: Load → Load → Multiply → Load → Multiply → Store → ...
             let a0 = vld1q_f32(base);
             let a1 = vld1q_f32(base.add(LANES_F32));
-            let a2 = vld1q_f32(base.add(LANES_F32 * 2));
-            let a3 = vld1q_f32(base.add(LANES_F32 * 3));
             let c0 = vmulq_f32(a0, factor_v);
+            let a2 = vld1q_f32(base.add(LANES_F32 * 2));
             let c1 = vmulq_f32(a1, factor_v);
+            let a3 = vld1q_f32(base.add(LANES_F32 * 3));
             let c2 = vmulq_f32(a2, factor_v);
-            let c3 = vmulq_f32(a3, factor_v);
-            let out_base = ptr_out.add(i);
             vst1q_f32(out_base, c0);
+            let a4 = vld1q_f32(base.add(LANES_F32 * 4));
+            let c3 = vmulq_f32(a3, factor_v);
             vst1q_f32(out_base.add(LANES_F32), c1);
+            let a5 = vld1q_f32(base.add(LANES_F32 * 5));
+            let c4 = vmulq_f32(a4, factor_v);
             vst1q_f32(out_base.add(LANES_F32 * 2), c2);
+            let a6 = vld1q_f32(base.add(LANES_F32 * 6));
+            let c5 = vmulq_f32(a5, factor_v);
             vst1q_f32(out_base.add(LANES_F32 * 3), c3);
+            let a7 = vld1q_f32(base.add(LANES_F32 * 7));
+            let c6 = vmulq_f32(a6, factor_v);
+            vst1q_f32(out_base.add(LANES_F32 * 4), c4);
+            let c7 = vmulq_f32(a7, factor_v);
+            vst1q_f32(out_base.add(LANES_F32 * 5), c5);
+            vst1q_f32(out_base.add(LANES_F32 * 6), c6);
+            vst1q_f32(out_base.add(LANES_F32 * 7), c7);
+            
             i += unroll;
         }
         while i + LANES_F32 <= len {

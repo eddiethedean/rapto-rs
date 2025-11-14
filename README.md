@@ -3,7 +3,7 @@
 Rust-powered, NumPy-compatible Python array library scaffolding. The project
 name expands to **Rust Accelerated Parallel Tensor Operations (`rapto-rs`)**.
 
-> **Current release:** `0.0.2`
+> **Current release:** `0.1.0`
 
 ## Getting Started
 
@@ -82,10 +82,12 @@ assert alias.to_list()[4] == 99.0
 - Control the Rayon pool used for large 2-D workloads with `RAPTORS_THREADS=<N>` (values ≤1 fall back to single-threaded execution).
 - Inspect adaptive thresholds, backend usage, and pool sizing with `raptors.threading_info()`. The diagnostics now include per-operation backend counters (SIMD, Rayon-SIMD, BLAS, Scalar) so you can confirm which path executed.
 - Contiguous elementwise add/scale and row/column broadcasts prioritize SIMD first, then fall back to Accelerate or scalar code when heuristics predict it will be faster. Multi-thread fan-out is driven by adaptive chunk sizing tuned for 1024²–4096² grids.
-- Recent float32 improvements put us ahead of NumPy on several hot paths (see `docs/perf_report.md` for the running table). Highlights on an Apple M3 Pro:
-  - `scale` 1024² (threads=auto): **0.31 ms** vs NumPy **0.40 ms** (≈1.29×).
-  - `scale` 2048² transpose: **0.34 ms** vs **0.41 ms** (≈1.21×).
-  - `broadcast_add` transpose 2048²: **0.40 ms** vs **0.69 ms** (≈1.73×).
+- **Performance Milestone (v0.1.0)**: Raptors now outperforms NumPy on **33/36 operations (91.7%)** across the 2D benchmark suite, with many operations achieving 2-10× speedups. Highlights on an Apple M3 Pro:
+  - **All float32 operations faster than NumPy** (18/18 operations)
+  - `mean_axis0` operations: **5-10× faster** than NumPy across all sizes
+  - `scale` 2048² float32: **2.69× faster** than NumPy (0.40ms vs 1.07ms)
+  - `sum` and `mean` operations: **2-4× faster** than NumPy for float32
+  - See `docs/perf_report.md` for the complete performance breakdown
 - The benchmarking helper accepts presets and JSON export for repeatable runs:
 
   ```bash

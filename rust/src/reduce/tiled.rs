@@ -5,7 +5,12 @@ const DIRECT_REDUCTION_LIMIT: usize = 1 << 20;
 const DIRECT_PARALLEL_MIN_ELEMENTS: usize = 1 << 21;
 const DIRECT_MIN_ROWS_PER_CHUNK: usize = 96;
 pub(crate) const SMALL_DIRECT_THRESHOLD: usize = 1 << 12;
-const F64_PAR_CHUNK: usize = 1 << 14;
+// Cache-aware chunk sizes: L1 cache ~32KB, so ~4096 f64 or ~8192 f32 elements
+const F64_PAR_CHUNK: usize = 1 << 12; // 4096 elements = 32KB
+const F32_PAR_CHUNK: usize = 1 << 13; // 8192 elements = 32KB
+// L2 cache-aware chunks for larger arrays
+const F64_L2_CHUNK: usize = 1 << 16; // 65536 elements = 512KB
+const F32_L2_CHUNK: usize = 1 << 17; // 131072 elements = 512KB
 
 fn recommended_accumulators(len: usize, max: usize) -> usize {
     if len >= 1 << 22 {
@@ -75,7 +80,11 @@ pub fn reduce_full_f64(
         };
     }
 
-    let allow_parallel = allow_parallel || elements >= DIRECT_PARALLEL_MIN_ELEMENTS;
+    // For medium-sized arrays (1M-2M elements), prefer sequential SIMD to avoid parallel overhead
+    // Parallel path has overhead that makes it slower for these sizes
+    // Keep sequential for both sum and mean at 1M elements (sequential path is optimized)
+    let prefer_sequential = elements >= 1 << 20 && elements < DIRECT_PARALLEL_MIN_ELEMENTS;
+    let allow_parallel = (allow_parallel || elements >= DIRECT_PARALLEL_MIN_ELEMENTS) && !prefer_sequential;
 
     let direct_pool = if allow_parallel { pool } else { None };
     let (total, parallel_used) = fast_sum_f64(data, direct_pool, allow_parallel);
@@ -170,9 +179,32 @@ fn fast_sum_f64(
         if let Some(pool) = pool {
             let total = pool.install(|| {
                 use rayon::prelude::*;
-                data.par_chunks(F64_PAR_CHUNK)
+                // Optimize chunk size for large arrays: use larger chunks to reduce overhead
+                // For very large arrays (>= 4M elements), use 16384 element chunks
+                // For medium arrays, use 8192 element chunks
+                // For smaller arrays, use L1 cache-sized chunks
+                let chunk_size = if data.len() >= 1 << 22 {
+                    // Very large arrays: 16384 elements = 128KB (fits in L2 cache)
+                    1 << 14
+                } else if data.len() >= F64_L2_CHUNK * 4 {
+                    // Large arrays: 8192 elements = 64KB (fits in L1 cache)
+                    1 << 13
+                } else if data.len() >= F64_L2_CHUNK {
+                    F64_L2_CHUNK
+                } else {
+                    F64_PAR_CHUNK
+                };
+                // Use tree reduction: reduce chunks in parallel, then reduce chunk sums
+                // This minimizes synchronization overhead
+                data.par_chunks(chunk_size)
                     .map(|chunk| {
-                        simd::reduce_sum_f64(chunk, recommended_accumulators(chunk.len(), 8))
+                        // Use AVX-512 when available (8 accumulators for large chunks)
+                        let acc_count = if chunk.len() >= chunk_size {
+                            8
+                        } else {
+                            recommended_accumulators(chunk.len(), 8)
+                        };
+                        simd::reduce_sum_f64(chunk, acc_count)
                             .unwrap_or_else(|| chunk.iter().copied().sum())
                     })
                     .sum()
@@ -181,8 +213,62 @@ fn fast_sum_f64(
         }
     }
 
-    let total = simd::reduce_sum_f64(data, recommended_accumulators(data.len(), 8))
-        .unwrap_or_else(|| data.iter().copied().sum());
+    // Sequential path with cache-aware processing
+    // For large arrays, use larger chunks to better utilize cache
+    let total = if data.len() >= 1 << 22 {
+        // Very large arrays: use 16384 element chunks
+        let mut sum = 0.0;
+        for chunk in data.chunks(1 << 14) {
+            sum += simd::reduce_sum_f64(chunk, 8)
+                .unwrap_or_else(|| chunk.iter().copied().sum());
+        }
+        sum
+    } else if data.len() >= 1 << 20 {
+        // Optimize for 1M elements: use optimal chunk size and accumulator count
+        // For exactly 1M elements (1024²), use 8192 element chunks (64KB, L1 cache)
+        // and recommended accumulator count (7) for optimal performance
+        let chunk_size = if data.len() >= 1 << 21 {
+            // For 2M+ elements, use 16384 element chunks (128KB, L2 cache)
+            1 << 14
+        } else {
+            // For exactly 1M elements, use 8192 element chunks (64KB, better L1 cache fit)
+            // This improves cache utilization compared to 16384 element chunks
+            1 << 13
+        };
+        let acc_count = if data.len() == 1 << 20 {
+            // For exactly 1M elements, use recommended accumulator count (7)
+            // This avoids register pressure while maintaining good SIMD utilization
+            recommended_accumulators(1 << 20, 8)
+        } else {
+            // For 2M+ elements, use 8 accumulators
+            8
+        };
+        let mut sum = 0.0;
+        for chunk in data.chunks(chunk_size) {
+            sum += simd::reduce_sum_f64(chunk, acc_count)
+                .unwrap_or_else(|| chunk.iter().copied().sum());
+        }
+        sum
+    } else if data.len() >= F64_L2_CHUNK {
+        // Large arrays: use L2 cache-sized chunks
+        let mut sum = 0.0;
+        for chunk in data.chunks(F64_L2_CHUNK) {
+            sum += simd::reduce_sum_f64(chunk, recommended_accumulators(chunk.len(), 8))
+                .unwrap_or_else(|| chunk.iter().copied().sum());
+        }
+        sum
+    } else if data.len() >= F64_PAR_CHUNK {
+        // Medium arrays: use L1 cache-sized chunks
+        let mut sum = 0.0;
+        for chunk in data.chunks(F64_PAR_CHUNK) {
+            sum += simd::reduce_sum_f64(chunk, recommended_accumulators(chunk.len(), 8))
+                .unwrap_or_else(|| chunk.iter().copied().sum());
+        }
+        sum
+    } else {
+        simd::reduce_sum_f64(data, recommended_accumulators(data.len(), 8))
+            .unwrap_or_else(|| data.iter().copied().sum())
+    };
     (total, false)
 }
 
@@ -195,9 +281,18 @@ fn direct_sum_f32(data: &[f32], rows: usize, cols: usize, pool: Option<&rayon::T
         let threads = pool.current_num_threads().max(1);
         let chunk_rows = (rows / threads).max(1);
         if elements >= DIRECT_PARALLEL_MIN_ELEMENTS || chunk_rows >= DIRECT_MIN_ROWS_PER_CHUNK {
-            let chunk_len = cols
+            // Use cache-aware chunking
+            let base_chunk_len = cols
                 .saturating_mul(chunk_rows)
                 .max(cols.saturating_mul(DIRECT_MIN_ROWS_PER_CHUNK.min(rows)));
+            // Align to cache line boundaries (L1 cache ~32KB)
+            let chunk_len = if elements >= F32_L2_CHUNK * 4 {
+                // Large arrays: use L2 cache-sized chunks
+                base_chunk_len.max(F32_L2_CHUNK).min(elements)
+            } else {
+                // Medium arrays: use L1 cache-sized chunks
+                base_chunk_len.max(F32_PAR_CHUNK).min(elements)
+            };
             return pool.install(|| {
                 use rayon::prelude::*;
                 data.par_chunks(chunk_len)
@@ -210,8 +305,18 @@ fn direct_sum_f32(data: &[f32], rows: usize, cols: usize, pool: Option<&rayon::T
             });
         }
     }
+    // Sequential path with cache-aware processing
     let acc = recommended_accumulators(data.len(), 8);
-    simd::reduce_sum_f32(data, acc).unwrap_or_else(|| data.iter().map(|&v| v as f64).sum())
+    if data.len() >= F32_PAR_CHUNK {
+        let mut sum = 0.0;
+        for chunk in data.chunks(F32_PAR_CHUNK) {
+            sum += simd::reduce_sum_f32(chunk, recommended_accumulators(chunk.len(), 8))
+                .unwrap_or_else(|| chunk.iter().map(|&v| v as f64).sum::<f64>());
+        }
+        sum
+    } else {
+        simd::reduce_sum_f32(data, acc).unwrap_or_else(|| data.iter().map(|&v| v as f64).sum())
+    }
 }
 
 fn sequential_sum_f32(
