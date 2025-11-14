@@ -25,6 +25,8 @@ full plan.
 
 ### Installation (local development)
 
+#### macOS / Linux (native)
+
 ```bash
 # Build and install the Rust extension into your active virtualenv.
 maturin develop
@@ -32,6 +34,35 @@ maturin develop
 # Or build a release wheel.
 maturin build --release
 ```
+
+#### Linux Development via Docker
+
+For Linux development, benchmarking, and profiling, we provide a Docker-based environment that ensures consistency and includes all necessary tools:
+
+```bash
+# Build the Docker image
+./scripts/docker_bench.sh build
+
+# Open an interactive shell in the container
+./scripts/docker_bench.sh shell
+
+# Inside the container, build and install Raptors
+cd /workspace/src
+/workspace/.venv/bin/maturin develop --release
+
+# Run tests
+/workspace/.venv/bin/python -m pytest tests/
+
+# Run benchmarks
+/workspace/.venv/bin/python scripts/compare_numpy_raptors.py --suite 2d
+```
+
+See [docs/linux_development_guide.md](docs/linux_development_guide.md) for detailed instructions on:
+- Setting up the Docker environment
+- Building and running the project
+- Running tests and benchmarks
+- Performance profiling with `perf` and `py-spy`
+- Development workflow and troubleshooting
 
 ## Quickstart
 
