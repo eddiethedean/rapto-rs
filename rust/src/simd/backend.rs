@@ -133,7 +133,7 @@ pub fn prefetched_rows() -> usize {
 #[cfg(target_arch = "x86_64")]
 #[inline]
 pub unsafe fn prefetch_read(addr: *const u8) {
-    use std::arch::x86_64::_mm_prefetch;
+    use std::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
     _mm_prefetch(addr as *const i8, _MM_HINT_T0);
 }
 
