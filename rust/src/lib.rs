@@ -1621,9 +1621,15 @@ fn blas_scale_f32_optimal(src: &[f32], factor: f32, dst: &mut [f32], len: usize)
     #[cfg(all(feature = "openblas", not(target_os = "macos")))]
     {
         // On Linux/Windows, try OpenBLAS if available
+        let _ = (src, factor, dst, len); // Suppress unused variable warnings on non-macOS
         if openblas_scale_f32(src, factor, dst) {
             return Some("openblas");
         }
+    }
+    
+    #[cfg(not(any(target_os = "macos", all(feature = "openblas", not(target_os = "macos")))))]
+    {
+        let _ = (src, factor, dst, len); // Suppress unused variable warnings
     }
     
     None
@@ -1650,15 +1656,20 @@ fn blas_scale_f64_optimal(src: &[f64], factor: f64, dst: &mut [f64], len: usize)
     #[cfg(all(feature = "openblas", not(target_os = "macos")))]
     {
         // On Linux/Windows, try OpenBLAS if available
+        let _ = len; // Suppress unused variable warning on non-macOS
         if openblas_scale_f64(src, factor, dst) {
             return Some("openblas");
         }
     }
     
+    #[cfg(not(any(target_os = "macos", all(feature = "openblas", not(target_os = "macos")))))]
+    {
+        let _ = (src, factor, dst, len); // Suppress unused variable warnings
+    }
+    
     None
 }
 
-#[cfg(target_os = "macos")]
 #[inline]
 fn threading_snapshot() -> ThreadingSnapshot {
     let mut snapshot = adaptive_state()
