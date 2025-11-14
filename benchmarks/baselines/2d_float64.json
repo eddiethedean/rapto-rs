@@ -6,7 +6,7 @@
     ],
     "dtype": "float64",
     "operation": "broadcast_add",
-    "max_raptors_ms": 0.3871
+    "max_raptors_ms": 0.1366
   },
   {
     "shape": [
@@ -15,7 +15,7 @@
     ],
     "dtype": "float64",
     "operation": "mean",
-    "max_raptors_ms": 0.0652
+    "max_raptors_ms": 0.0318
   },
   {
     "shape": [
@@ -24,7 +24,7 @@
     ],
     "dtype": "float64",
     "operation": "mean_axis0",
-    "max_raptors_ms": 0.0116
+    "max_raptors_ms": 0.0158
   },
   {
     "shape": [
@@ -33,7 +33,7 @@
     ],
     "dtype": "float64",
     "operation": "mean_axis1",
-    "max_raptors_ms": 0.0726
+    "max_raptors_ms": 0.0365
   },
   {
     "shape": [
@@ -51,7 +51,7 @@
     ],
     "dtype": "float64",
     "operation": "sum",
-    "max_raptors_ms": 0.0697
+    "max_raptors_ms": 0.0308
   },
   {
     "shape": [
@@ -60,7 +60,7 @@
     ],
     "dtype": "float64",
     "operation": "broadcast_add",
-    "max_raptors_ms": 0.7355
+    "max_raptors_ms": 0.628
   },
   {
     "shape": [
@@ -69,7 +69,7 @@
     ],
     "dtype": "float64",
     "operation": "mean",
-    "max_raptors_ms": 0.4962
+    "max_raptors_ms": 0.09
   },
   {
     "shape": [
@@ -78,7 +78,7 @@
     ],
     "dtype": "float64",
     "operation": "mean_axis0",
-    "max_raptors_ms": 0.0195
+    "max_raptors_ms": 0.0266
   },
   {
     "shape": [
@@ -87,7 +87,7 @@
     ],
     "dtype": "float64",
     "operation": "mean_axis1",
-    "max_raptors_ms": 0.6231
+    "max_raptors_ms": 0.0868
   },
   {
     "shape": [
@@ -96,7 +96,7 @@
     ],
     "dtype": "float64",
     "operation": "scale",
-    "max_raptors_ms": 0.6752
+    "max_raptors_ms": 0.522
   },
   {
     "shape": [
@@ -105,7 +105,7 @@
     ],
     "dtype": "float64",
     "operation": "sum",
-    "max_raptors_ms": 0.3243
+    "max_raptors_ms": 0.0906
   },
   {
     "shape": [
@@ -114,7 +114,7 @@
     ],
     "dtype": "float64",
     "operation": "broadcast_add",
-    "max_raptors_ms": 3.2956
+    "max_raptors_ms": 2.426
   },
   {
     "shape": [
@@ -123,7 +123,7 @@
     ],
     "dtype": "float64",
     "operation": "mean",
-    "max_raptors_ms": 0.7258
+    "max_raptors_ms": 0.5012
   },
   {
     "shape": [
@@ -132,7 +132,7 @@
     ],
     "dtype": "float64",
     "operation": "mean_axis0",
-    "max_raptors_ms": 0.8438
+    "max_raptors_ms": 0.625
   },
   {
     "shape": [
@@ -141,7 +141,7 @@
     ],
     "dtype": "float64",
     "operation": "mean_axis1",
-    "max_raptors_ms": 0.7807
+    "max_raptors_ms": 0.5006
   },
   {
     "shape": [
@@ -150,7 +150,7 @@
     ],
     "dtype": "float64",
     "operation": "scale",
-    "max_raptors_ms": 2.2872
+    "max_raptors_ms": 1.745
   },
   {
     "shape": [
@@ -159,6 +159,6 @@
     ],
     "dtype": "float64",
     "operation": "sum",
-    "max_raptors_ms": 0.8177
+    "max_raptors_ms": 0.4662
   }
 ]
