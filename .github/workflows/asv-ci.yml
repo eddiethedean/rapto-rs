@@ -53,20 +53,20 @@ jobs:
           & "${{ github.workspace }}\.venv\Scripts\Activate.ps1"
           pip install asv maturin numpy
 
-      - name: Build Raptors extension (Linux)
+      - name: Build and install Raptors extension (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
           source .venv/bin/activate
-          maturin develop --release
+          pip install .
         env:
           VIRTUAL_ENV: ${{ github.workspace }}/.venv
 
-      - name: Build Raptors extension (Windows)
+      - name: Build and install Raptors extension (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           & "${{ github.workspace }}\.venv\Scripts\Activate.ps1"
-          maturin develop --release
+          pip install .
         env:
           VIRTUAL_ENV: ${{ github.workspace }}\.venv
 
