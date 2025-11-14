@@ -414,32 +414,61 @@ pub fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Optio
 }
 
 pub fn reduce_axis0_columns_f64(data: &[f64], rows: usize, cols: usize) -> Option<Vec<f64>> {
+    use std::env;
+    let debug = env::var("RAPTORS_DEBUG_AXIS0").is_ok();
+    if debug {
+        eprintln!("[DEBUG] simd::reduce_axis0_columns_f64: rows={}, cols={}, data.len()={}", rows, cols, data.len());
+    }
     if cols == 0 {
+        if debug {
+            eprintln!("[DEBUG] simd::reduce_axis0_columns_f64: cols == 0, returning empty vec");
+        }
         return Some(Vec::new());
     }
     let elements = rows.checked_mul(cols)?;
     if elements != data.len() {
+        if debug {
+            eprintln!("[DEBUG] simd::reduce_axis0_columns_f64: length mismatch - elements={}, data.len()={}, returning None", elements, data.len());
+        }
         return None;
     }
     if rows == 0 {
+        if debug {
+            eprintln!("[DEBUG] simd::reduce_axis0_columns_f64: rows == 0, returning zeros");
+        }
         return Some(vec![0.0; cols]);
     }
     #[cfg(target_arch = "x86_64")]
     {
         if cpu::capabilities().avx512 {
+            if debug {
+                eprintln!("[DEBUG] simd::reduce_axis0_columns_f64: Using AVX512 path");
+            }
             return Some(unsafe { x86::avx512::reduce_axis0_columns_f64(data, rows, cols) });
         }
         if cpu::capabilities().avx2 {
+            if debug {
+                eprintln!("[DEBUG] simd::reduce_axis0_columns_f64: Using AVX2 path");
+            }
             return Some(unsafe { x86::reduce_axis0_columns_f64(data, rows, cols) });
+        }
+        if debug {
+            eprintln!("[DEBUG] simd::reduce_axis0_columns_f64: No x86 SIMD capabilities, returning None");
         }
         return None;
     }
     #[cfg(target_arch = "aarch64")]
     {
+        if debug {
+            eprintln!("[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)");
+        }
         return Some(unsafe { neon::reduce_axis0_columns_f64(data, rows, cols) });
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
+        if debug {
+            eprintln!("[DEBUG] simd::reduce_axis0_columns_f64: Unsupported architecture, returning None");
+        }
         let _ = (data, rows, cols);
         None
     }
@@ -2083,14 +2112,77 @@ mod neon {
     pub unsafe fn reduce_axis0_columns_f64(data: &[f64], rows: usize, cols: usize) -> Vec<f64> {
         debug_assert_eq!(rows.saturating_mul(cols), data.len());
         let mut out = vec![0.0f64; cols];
+        if rows == 0 || cols == 0 {
+            return out;
+        }
         let stride = cols;
         let base_ptr = data.as_ptr();
+        let out_ptr = out.as_mut_ptr();
+
+        // For large matrices (2048²), use tiled approach for better cache locality
+        // This processes data in blocks to keep working set in L1/L2 cache
+        const ROW_TILE_F64: usize = 128; // Process 128 rows at a time (L1 cache friendly)
+        const COL_TILE_F64: usize = 64; // Process 64 columns at a time (fits in L1 cache ~16KB)
+        const MAX_TILE_VECTORS_F64: usize = COL_TILE_F64 / LANES_F64;
+
+        if rows >= 512 && cols >= 512 {
+            // Tiled reduction for large matrices - more cache-friendly than columnar
+            let mut row_start = 0usize;
+            while row_start < rows {
+                let block_rows = (rows - row_start).min(ROW_TILE_F64);
+                let mut col = 0usize;
+                while col < cols {
+                    let width = (cols - col).min(COL_TILE_F64);
+                    let vec_count = width / LANES_F64;
+                    let tail_start = vec_count * LANES_F64;
+                    let tail = width - tail_start;
+                    let mut vec_acc = [vdupq_n_f64(0.0); MAX_TILE_VECTORS_F64];
+                    let mut tail_acc = [0.0f64; LANES_F64];
+
+                    let mut r = 0usize;
+                    while r < block_rows {
+                        let ptr = base_ptr.add((row_start + r) * stride + col);
+                        for v in 0..vec_count {
+                            let offset = v * LANES_F64;
+                            let vec = vld1q_f64(ptr.add(offset));
+                            vec_acc[v] = vaddq_f64(vec_acc[v], vec);
+                        }
+                        if tail > 0 {
+                            for t in 0..tail {
+                                tail_acc[t] += *ptr.add(tail_start + t);
+                            }
+                        }
+                        r += 1;
+                    }
+
+                    for v in 0..vec_count {
+                        let dst = out_ptr.add(col + v * LANES_F64);
+                        let prev = vld1q_f64(dst);
+                        let sum = vaddq_f64(prev, vec_acc[v]);
+                        vst1q_f64(dst, sum);
+                    }
+                    if tail > 0 {
+                        for t in 0..tail {
+                            let idx = col + tail_start + t;
+                            *out_ptr.add(idx) += tail_acc[t];
+                        }
+                    }
+
+                    col += width;
+                }
+                row_start += block_rows;
+            }
+            return out;
+        }
+
+        // For smaller matrices, use columnar approach
         let mut col = 0usize;
 
-        // Optimize for 2048 rows: process 8 columns at once (4 vectors) with increased prefetch
+        // Optimize for 2048 rows: process 8 columns at once (4 vectors) with loop unrolling and prefetch
         if rows == 2048 {
             const COLUMN_BLOCK_2048: usize = LANES_F64 * 4; // Process 8 columns at once
-            const PREFETCH_ROWS_2048: usize = 16; // Increase from 8 to 16 for better memory pipelining
+            const PREFETCH_ROWS_2048: usize = 32; // Prefetch further ahead for better pipelining
+            const UNROLL_FACTOR: usize = 4; // Unroll inner loop 4x
             
             while col + COLUMN_BLOCK_2048 <= cols {
                 let mut acc0 = vdupq_n_f64(0.0);
@@ -2098,37 +2190,63 @@ mod neon {
                 let mut acc2 = vdupq_n_f64(0.0);
                 let mut acc3 = vdupq_n_f64(0.0);
                 let mut row_ptr = base_ptr.add(col);
-                for row_idx in 0..rows {
-                    if row_idx + PREFETCH_ROWS_2048 < rows {
-                        #[cfg(target_arch = "aarch64")]
-                        {
-                            core::arch::asm!(
-                                "prfm pldl1keep, [{addr}]",
-                                addr = in(reg) row_ptr.add(stride * PREFETCH_ROWS_2048),
-                                options(readonly, nostack)
-                            );
-                        }
+                
+                // Unroll the inner loop to reduce loop overhead and improve instruction-level parallelism
+                let mut row_idx = 0usize;
+                while row_idx + UNROLL_FACTOR <= rows {
+                    // Prefetch ahead
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) row_ptr.add(stride * PREFETCH_ROWS_2048),
+                            options(readonly, nostack)
+                        );
                     }
+                    
+                    // Unroll 4 iterations
                     acc0 = vaddq_f64(acc0, vld1q_f64(row_ptr));
                     acc1 = vaddq_f64(acc1, vld1q_f64(row_ptr.add(LANES_F64)));
                     acc2 = vaddq_f64(acc2, vld1q_f64(row_ptr.add(LANES_F64 * 2)));
                     acc3 = vaddq_f64(acc3, vld1q_f64(row_ptr.add(LANES_F64 * 3)));
                     row_ptr = row_ptr.add(stride);
+                    
+                    acc0 = vaddq_f64(acc0, vld1q_f64(row_ptr));
+                    acc1 = vaddq_f64(acc1, vld1q_f64(row_ptr.add(LANES_F64)));
+                    acc2 = vaddq_f64(acc2, vld1q_f64(row_ptr.add(LANES_F64 * 2)));
+                    acc3 = vaddq_f64(acc3, vld1q_f64(row_ptr.add(LANES_F64 * 3)));
+                    row_ptr = row_ptr.add(stride);
+                    
+                    acc0 = vaddq_f64(acc0, vld1q_f64(row_ptr));
+                    acc1 = vaddq_f64(acc1, vld1q_f64(row_ptr.add(LANES_F64)));
+                    acc2 = vaddq_f64(acc2, vld1q_f64(row_ptr.add(LANES_F64 * 2)));
+                    acc3 = vaddq_f64(acc3, vld1q_f64(row_ptr.add(LANES_F64 * 3)));
+                    row_ptr = row_ptr.add(stride);
+                    
+                    acc0 = vaddq_f64(acc0, vld1q_f64(row_ptr));
+                    acc1 = vaddq_f64(acc1, vld1q_f64(row_ptr.add(LANES_F64)));
+                    acc2 = vaddq_f64(acc2, vld1q_f64(row_ptr.add(LANES_F64 * 2)));
+                    acc3 = vaddq_f64(acc3, vld1q_f64(row_ptr.add(LANES_F64 * 3)));
+                    row_ptr = row_ptr.add(stride);
+                    
+                    row_idx += UNROLL_FACTOR;
                 }
-                let mut buf0 = [0.0f64; LANES_F64];
-                let mut buf1 = [0.0f64; LANES_F64];
-                let mut buf2 = [0.0f64; LANES_F64];
-                let mut buf3 = [0.0f64; LANES_F64];
-                vst1q_f64(buf0.as_mut_ptr(), acc0);
-                vst1q_f64(buf1.as_mut_ptr(), acc1);
-                vst1q_f64(buf2.as_mut_ptr(), acc2);
-                vst1q_f64(buf3.as_mut_ptr(), acc3);
-                for lane in 0..LANES_F64 {
-                    out[col + lane] = buf0[lane];
-                    out[col + LANES_F64 + lane] = buf1[lane];
-                    out[col + LANES_F64 * 2 + lane] = buf2[lane];
-                    out[col + LANES_F64 * 3 + lane] = buf3[lane];
+                
+                // Handle remaining rows
+                while row_idx < rows {
+                    acc0 = vaddq_f64(acc0, vld1q_f64(row_ptr));
+                    acc1 = vaddq_f64(acc1, vld1q_f64(row_ptr.add(LANES_F64)));
+                    acc2 = vaddq_f64(acc2, vld1q_f64(row_ptr.add(LANES_F64 * 2)));
+                    acc3 = vaddq_f64(acc3, vld1q_f64(row_ptr.add(LANES_F64 * 3)));
+                    row_ptr = row_ptr.add(stride);
+                    row_idx += 1;
                 }
+                
+                // Store results directly to output vector (avoid intermediate buffer)
+                vst1q_f64(out.as_mut_ptr().add(col), acc0);
+                vst1q_f64(out.as_mut_ptr().add(col + LANES_F64), acc1);
+                vst1q_f64(out.as_mut_ptr().add(col + LANES_F64 * 2), acc2);
+                vst1q_f64(out.as_mut_ptr().add(col + LANES_F64 * 3), acc3);
                 col += COLUMN_BLOCK_2048;
             }
         }

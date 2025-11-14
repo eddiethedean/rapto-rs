@@ -1,0 +1,27 @@
+services:
+  bench:
+    build:
+      context: .
+      dockerfile: Dockerfile.bench
+    container_name: raptors-bench
+    volumes:
+      - .:/workspace/src
+      - raptors-venv:/workspace/.venv
+      - raptors-target:/workspace/src/rust/target
+      - ./benchmarks/docker_results:/workspace/src/benchmarks/docker_results
+      - ./docs/profiles:/workspace/src/docs/profiles
+    working_dir: /workspace/src
+    environment:
+      - PYTHONPATH=/workspace/.venv/lib/python3.11/site-packages:/workspace/src/python
+      - RAPTORS_THREADS=10
+      - RAPTORS_SIMD=auto
+    # Enable perf events (requires privileged mode for perf)
+    privileged: true
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+
+volumes:
+  raptors-venv:
+  raptors-target:
+

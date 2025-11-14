@@ -1,0 +1,55 @@
+FROM ubuntu:22.04
+
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    pkg-config \
+    curl \
+    git \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    libblas-dev \
+    liblapack-dev \
+    libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install profiling tools (linux-tools contains perf)
+RUN apt-get update && apt-get install -y \
+    linux-tools-generic \
+    linux-tools-common \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/lib/linux-tools/*/perf /usr/local/bin/perf || true
+
+# Note: py-spy and flamegraph will be installed after copying source
+
+# Set working directory (source will be mounted at /workspace/src)
+WORKDIR /workspace
+
+# Create a placeholder for source code (will be mounted as volume)
+RUN mkdir -p /workspace/src
+
+# Create virtual environment and install dependencies
+RUN python3.11 -m venv /workspace/.venv && \
+    /workspace/.venv/bin/pip install --upgrade pip && \
+    /workspace/.venv/bin/pip install maturin numpy asv py-spy flamegraph
+
+# Create a dummy build step (actual build will happen when source is mounted)
+# This ensures the venv and dependencies are set up correctly
+RUN echo "Docker image ready. Source code will be mounted at runtime."
+
+# Set environment variables
+ENV PYTHONPATH=/workspace/python
+ENV RAPTORS_THREADS=10
+ENV RAPTORS_SIMD=auto
+
+# Default command
+CMD ["/bin/bash"]
+

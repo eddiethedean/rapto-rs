@@ -1,0 +1,9 @@
+{
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "machine": "Odoss-MacBook-Air.local",
+    "num_cpu": "10",
+    "os": "Darwin 24.6.0",
+    "ram": "25769803776",
+    "version": 1
+}

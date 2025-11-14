@@ -100,8 +100,18 @@ def product(values: Sequence[int]) -> int:
 
 
 def benchmark(fn: OperationFn, warmup: int, repeats: int) -> List[float]:
-    for _ in range(max(warmup, 0)):
+    # Ensure sufficient warmup for consistent cache state (minimum 10 iterations)
+    effective_warmup = max(warmup, 10)
+    
+    # Pre-warmup: execute function to ensure cache is warm
+    for _ in range(effective_warmup):
         fn()
+    
+    # Cache warming: touch memory in similar pattern to actual operation
+    # Run a few more iterations to ensure cache is consistently warm
+    for _ in range(min(5, effective_warmup // 2)):
+        fn()
+    
     timings: List[float] = []
     for _ in range(max(repeats, 1)):
         start = time.perf_counter()
