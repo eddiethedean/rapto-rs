@@ -4526,12 +4526,31 @@ fn reduce_axis0_f64(
             eprintln!("[DEBUG]   BLAS backend: {}", blas::backend_name());
         }
         
-        // On Linux, try optimized SIMD first (can be faster than BLAS)
+        // On Linux, try BLAS first for 2048² float64 (BLAS is faster than SIMD for float64)
         #[cfg(not(target_os = "macos"))]
         {
+            if blas::axis0_enabled() {
+                let mut sums = vec![0.0f64; cols];
+                if blas::current_backend().dgemv_axis0_sum(rows, cols, data, &mut sums) {
+                    if debug {
+                        eprintln!("[DEBUG] reduce_axis0_f64: Using BLAS path (Linux)");
+                    }
+                    if matches!(op, Reduction::Mean) {
+                        let inv = 1.0 / rows as f64;
+                        for value in &mut sums {
+                            *value *= inv;
+                        }
+                    }
+                    return AxisOutcome {
+                        values: sums,
+                        parallel: false,
+                    };
+                }
+            }
+            // Fall back to SIMD if BLAS is not available
             if let Some(mut simd_sums) = simd::reduce_axis0_columns_f64(data, rows, cols) {
                 if debug {
-                    eprintln!("[DEBUG] reduce_axis0_f64: Using SIMD kernel path (Linux)");
+                    eprintln!("[DEBUG] reduce_axis0_f64: Using SIMD kernel path (Linux fallback)");
                 }
                 if matches!(op, Reduction::Mean) {
                     let inv = 1.0 / rows as f64;
@@ -4912,21 +4931,19 @@ fn reduce_axis0_f32(
         }
     }
 
-    // For exactly 2048², try SIMD first on Linux (can be faster than BLAS)
-    // BLAS has overhead and may not be as optimized as SIMD on Linux/ARM64
-    // On macOS, BLAS (Accelerate) is highly optimized, but on Linux SIMD can be faster
+    // For exactly 2048², use optimized SIMD tiled path (BLAS is slower for float32 on Linux)
     if rows == 2048 && cols == 2048 {
         let debug = env::var("RAPTORS_DEBUG_AXIS0").is_ok();
         if debug {
             eprintln!("[DEBUG] reduce_axis0_f32: 2048² float32 path");
         }
         
-        // On Linux, try optimized SIMD first (can be faster than BLAS)
+        // On Linux, use optimized SIMD tiled path (BLAS tested and found to be slower)
         #[cfg(not(target_os = "macos"))]
         {
             if let Some(simd_sums) = simd::reduce_axis0_columns_f32(data, rows, cols) {
                 if debug {
-                    eprintln!("[DEBUG] reduce_axis0_f32: Using SIMD path (Linux)");
+                    eprintln!("[DEBUG] reduce_axis0_f32: Using optimized SIMD path (Linux)");
                 }
                 return finalize_axis0_f32(simd_sums, None, rows, cols, op, false);
             }
@@ -4958,7 +4975,7 @@ fn reduce_axis0_f32(
         }
         
         if debug {
-            eprintln!("[DEBUG] reduce_axis0_f32: SIMD fallback also returned None, trying BLAS");
+            eprintln!("[DEBUG] reduce_axis0_f32: SIMD fallback also returned None");
         }
         
         // On Linux, also try BLAS as a fallback

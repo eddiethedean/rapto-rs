@@ -1,0 +1,100 @@
+00000000000db664 <npyiter_buffered_reduce_iternext_iters2>:
+   db664:	a9bd7bfd 	stp	x29, x30, [sp, #-48]!
+   db668:	d2801601 	mov	x1, #0xb0                  	// #176
+   db66c:	d2804804 	mov	x4, #0x240                 	// #576
+   db670:	910003fd 	mov	x29, sp
+   db674:	a90153f3 	stp	x19, x20, [sp, #16]
+   db678:	aa0003f3 	mov	x19, x0
+   db67c:	91032014 	add	x20, x0, #0xc8
+   db680:	f90013f5 	str	x21, [sp, #32]
+   db684:	f9401403 	ldr	x3, [x0, #40]
+   db688:	b8430402 	ldr	w2, [x0], #48
+   db68c:	72190045 	ands	w5, w2, #0x80
+   db690:	9a840021 	csel	x1, x1, x4, eq  // eq = none
+   db694:	8b010015 	add	x21, x0, x1
+   db698:	372803e2 	tbnz	w2, #5, db714 <npyiter_buffered_reduce_iternext_iters2+0xb0>
+   db69c:	91000463 	add	x3, x3, #0x1
+   db6a0:	f9001663 	str	x3, [x19, #40]
+   db6a4:	f9400a82 	ldr	x2, [x20, #16]
+   db6a8:	eb02007f 	cmp	x3, x2
+   db6ac:	5400080b 	b.lt	db7ac <npyiter_buffered_reduce_iternext_iters2+0x148>  // b.tstop
+   db6b0:	f9400e81 	ldr	x1, [x20, #24]
+   db6b4:	f9401682 	ldr	x2, [x20, #40]
+   db6b8:	91000421 	add	x1, x1, #0x1
+   db6bc:	f9000e81 	str	x1, [x20, #24]
+   db6c0:	eb02003f 	cmp	x1, x2
+   db6c4:	540003ab 	b.lt	db738 <npyiter_buffered_reduce_iternext_iters2+0xd4>  // b.tstop
+   db6c8:	710000bf 	cmp	w5, #0x0
+   db6cc:	d2804502 	mov	x2, #0x228                 	// #552
+   db6d0:	d2801301 	mov	x1, #0x98                  	// #152
+   db6d4:	9a820021 	csel	x1, x1, x2, eq  // eq = none
+   db6d8:	8b010001 	add	x1, x0, x1
+   db6dc:	aa1303e0 	mov	x0, x19
+   db6e0:	a9400c22 	ldp	x2, x3, [x1]
+   db6e4:	a9000ea2 	stp	x2, x3, [x21]
+   db6e8:	9403d3aa 	bl	1d0590 <npyiter_copy_from_buffers>
+   db6ec:	37f80580 	tbnz	w0, #31, db79c <npyiter_buffered_reduce_iternext_iters2+0x138>
+   db6f0:	a9420660 	ldp	x0, x1, [x19, #32]
+   db6f4:	eb00003f 	cmp	x1, x0
+   db6f8:	5400046b 	b.lt	db784 <npyiter_buffered_reduce_iternext_iters2+0x120>  // b.tstop
+   db6fc:	52800000 	mov	w0, #0x0                   	// #0
+   db700:	f900069f 	str	xzr, [x20, #8]
+   db704:	f94013f5 	ldr	x21, [sp, #32]
+   db708:	a94153f3 	ldp	x19, x20, [sp, #16]
+   db70c:	a8c37bfd 	ldp	x29, x30, [sp], #48
+   db710:	d65f03c0 	ret
+   db714:	f9400681 	ldr	x1, [x20, #8]
+   db718:	8b030021 	add	x1, x1, x3
+   db71c:	f9001661 	str	x1, [x19, #40]
+   db720:	f9400e81 	ldr	x1, [x20, #24]
+   db724:	f9401682 	ldr	x2, [x20, #40]
+   db728:	91000421 	add	x1, x1, #0x1
+   db72c:	f9000e81 	str	x1, [x20, #24]
+   db730:	eb02003f 	cmp	x1, x2
+   db734:	54fffcaa 	b.ge	db6c8 <npyiter_buffered_reduce_iternext_iters2+0x64>  // b.tcont
+   db738:	f9408e61 	ldr	x1, [x19, #280]
+   db73c:	f9409660 	ldr	x0, [x19, #296]
+   db740:	8b010000 	add	x0, x0, x1
+   db744:	f90002a0 	str	x0, [x21]
+   db748:	f9009660 	str	x0, [x19, #296]
+   db74c:	f9409261 	ldr	x1, [x19, #288]
+   db750:	f9409a60 	ldr	x0, [x19, #304]
+   db754:	8b010000 	add	x0, x0, x1
+   db758:	f90006a0 	str	x0, [x21, #8]
+   db75c:	f9009a60 	str	x0, [x19, #304]
+   db760:	f9401660 	ldr	x0, [x19, #40]
+   db764:	f9400681 	ldr	x1, [x20, #8]
+   db768:	8b010000 	add	x0, x0, x1
+   db76c:	f9000a80 	str	x0, [x20, #16]
+   db770:	f94013f5 	ldr	x21, [sp, #32]
+   db774:	52800020 	mov	w0, #0x1                   	// #1
+   db778:	a94153f3 	ldp	x19, x20, [sp, #16]
+   db77c:	a8c37bfd 	ldp	x29, x30, [sp], #48
+   db780:	d65f03c0 	ret
+   db784:	aa1303e0 	mov	x0, x19
+   db788:	9403d22f 	bl	1d0044 <npyiter_goto_iterindex>
+   db78c:	aa1503e1 	mov	x1, x21
+   db790:	aa1303e0 	mov	x0, x19
+   db794:	9403d46b 	bl	1d0940 <npyiter_copy_to_buffers>
+   db798:	36fffec0 	tbz	w0, #31, db770 <npyiter_buffered_reduce_iternext_iters2+0x10c>
+   db79c:	aa1303e0 	mov	x0, x19
+   db7a0:	9403d9b8 	bl	1d1e80 <npyiter_clear_buffers>
+   db7a4:	52800000 	mov	w0, #0x0                   	// #0
+   db7a8:	17ffffd7 	b	db704 <npyiter_buffered_reduce_iternext_iters2+0xa0>
+   db7ac:	f8616802 	ldr	x2, [x0, x1]
+   db7b0:	f9408663 	ldr	x3, [x19, #264]
+   db7b4:	8b030042 	add	x2, x2, x3
+   db7b8:	f8216802 	str	x2, [x0, x1]
+   db7bc:	f94006a0 	ldr	x0, [x21, #8]
+   db7c0:	f9408a61 	ldr	x1, [x19, #272]
+   db7c4:	8b010000 	add	x0, x0, x1
+   db7c8:	f90006a0 	str	x0, [x21, #8]
+   db7cc:	17ffffe9 	b	db770 <npyiter_buffered_reduce_iternext_iters2+0x10c>
+
+00000000000db7d0 <npyiter_buffered_reduce_iternext_iters1>:
+   db7d0:	a9bd7bfd 	stp	x29, x30, [sp, #-48]!
+   db7d4:	d2801102 	mov	x2, #0x88                  	// #136
+   db7d8:	910003fd 	mov	x29, sp
+   db7dc:	a90153f3 	stp	x19, x20, [sp, #16]
+   db7e0:	aa0003f3 	mov	x19, x0
+   db7e4:	aa1303e1 	mov	x1, x19

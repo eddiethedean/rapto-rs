@@ -413,6 +413,18 @@ pub fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Optio
     }
 }
 
+pub fn reduce_axis0_columns_f32_columnar(data: &[f32], rows: usize, cols: usize) -> Option<Vec<f32>> {
+    #[cfg(target_arch = "aarch64")]
+    {
+        return unsafe { neon::reduce_axis0_columns_f32_columnar(data, rows, cols) };
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        let _ = (data, rows, cols);
+        None
+    }
+}
+
 pub fn reduce_axis0_columns_f64(data: &[f64], rows: usize, cols: usize) -> Option<Vec<f64>> {
     use std::env;
     let debug = env::var("RAPTORS_DEBUG_AXIS0").is_ok();
@@ -1932,6 +1944,64 @@ mod neon {
     }
 
     #[target_feature(enable = "neon")]
+    /// Columnar approach for exactly 2048x2048 - processes all rows for columns in blocks
+    /// This has better sequential memory access than tiled approach
+    pub unsafe fn reduce_axis0_columns_f32_columnar(data: &[f32], rows: usize, cols: usize) -> Option<Vec<f32>> {
+        if rows != 2048 || cols != 2048 {
+            return None;
+        }
+        
+        debug_assert_eq!(rows.saturating_mul(cols), data.len());
+        let mut out = vec![0.0f32; cols];
+        if rows == 0 || cols == 0 {
+            return Some(out);
+        }
+        let mut col = 0usize;
+        let stride = cols;
+        let base_ptr = data.as_ptr();
+        
+        // Process 64 columns at once (16 vectors) - optimized for 2048²
+        const COLUMN_BLOCK_2048: usize = 64; // Process 64 columns at once
+        const VECTORS_PER_BLOCK: usize = COLUMN_BLOCK_2048 / LANES_F32; // 16 vectors
+        
+        while col + COLUMN_BLOCK_2048 <= cols {
+            // Use multiple accumulator registers for better ILP
+            let mut acc = [vdupq_n_f32(0.0); VECTORS_PER_BLOCK];
+            let mut row_ptr = base_ptr.add(col);
+            
+            // Process all 2048 rows sequentially for these columns
+            for row_idx in 0..rows {
+                // Load 16 vectors (64 floats) from current row
+                for v in 0..VECTORS_PER_BLOCK {
+                    let offset = v * LANES_F32;
+                    let vec = vld1q_f32(row_ptr.add(offset));
+                    acc[v] = vaddq_f32(acc[v], vec);
+                }
+                row_ptr = row_ptr.add(stride);
+            }
+            
+            // Store results - write directly without loading previous (we're accumulating)
+            for v in 0..VECTORS_PER_BLOCK {
+                vst1q_f32(out.as_mut_ptr().add(col + v * LANES_F32), acc[v]);
+            }
+            col += COLUMN_BLOCK_2048;
+        }
+        
+        // Handle remaining columns
+        while col < cols {
+            let mut acc = vdupq_n_f32(0.0);
+            let mut row_ptr = base_ptr.add(col);
+            for row_idx in 0..rows {
+                acc = vaddq_f32(acc, vld1q_f32(row_ptr));
+                row_ptr = row_ptr.add(stride);
+            }
+            vst1q_f32(out.as_mut_ptr().add(col), acc);
+            col += LANES_F32;
+        }
+        
+        Some(out)
+    }
+    
     pub unsafe fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         debug_assert_eq!(rows.saturating_mul(cols), data.len());
         let debug = std::env::var("RAPTORS_DEBUG_AXIS0").is_ok();
@@ -1943,8 +2013,141 @@ mod neon {
         let base_ptr = data.as_ptr();
         let mut col = 0usize;
 
+        // Skip specialized path - use optimized tiled approach below
+        // (Testing shows columnar approaches are slower for this size)
+        
+        // Old specialized path disabled (was testing tiled approach)
+        if false {
+            if debug {
+                eprintln!("[DEBUG] neon::reduce_axis0_columns_f32: Using specialized 2048x2048 path (DISABLED)");
+            }
+            // Optimized tile sizes for 2048x2048: larger column tile (128 cols) fits well in L2
+            // Row tile of 256 rows * 128 cols * 4 bytes = 128KB (fits in L2 cache)
+            const ROW_TILE_2048_F32: usize = 256; // Process 256 rows at a time
+            const COL_TILE_2048_F32: usize = 128; // Process 128 columns at a time
+            const MAX_TILE_VECTORS_2048_F32: usize = COL_TILE_2048_F32 / LANES_F32;
+            const UNROLL_FACTOR_2048_F32: usize = 4; // Unroll 4x
+
+            let mut row_start = 0usize;
+            while row_start < rows {
+                let block_rows = (rows - row_start).min(ROW_TILE_2048_F32);
+                let mut col_idx = 0usize;
+                while col_idx < cols {
+                    let width = (cols - col_idx).min(COL_TILE_2048_F32);
+                    let vec_count = width / LANES_F32;
+                    let tail_start = vec_count * LANES_F32;
+                    let tail = width - tail_start;
+                    let mut vec_acc = [vdupq_n_f32(0.0); MAX_TILE_VECTORS_2048_F32];
+                    let mut tail_acc = [0.0f32; LANES_F32];
+
+                    // Aggressive prefetching for specialized path
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        let first_row_ptr = base_ptr.add(row_start * stride + col_idx);
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) first_row_ptr,
+                            options(readonly, nostack)
+                        );
+                        if row_start + ROW_TILE_2048_F32 < rows {
+                            let next_tile_ptr = base_ptr.add((row_start + ROW_TILE_2048_F32) * stride + col_idx);
+                            core::arch::asm!(
+                                "prfm pldl2keep, [{addr}]",
+                                addr = in(reg) next_tile_ptr,
+                                options(readonly, nostack)
+                            );
+                        }
+                        if col_idx + COL_TILE_2048_F32 < cols {
+                            let next_col_ptr = base_ptr.add(row_start * stride + col_idx + COL_TILE_2048_F32);
+                            core::arch::asm!(
+                                "prfm pldl2keep, [{addr}]",
+                                addr = in(reg) next_col_ptr,
+                                options(readonly, nostack)
+                            );
+                        }
+                    }
+
+                    // Unroll inner row loop
+                    let mut r = 0usize;
+                    while r + UNROLL_FACTOR_2048_F32 <= block_rows {
+                        #[cfg(target_arch = "aarch64")]
+                        {
+                            let prefetch_ptr = base_ptr.add((row_start + r + UNROLL_FACTOR_2048_F32 * 4) * stride + col_idx);
+                            core::arch::asm!(
+                                "prfm pldl1keep, [{addr}]",
+                                addr = in(reg) prefetch_ptr,
+                                options(readonly, nostack)
+                            );
+                        }
+
+                        for unroll_idx in 0..UNROLL_FACTOR_2048_F32 {
+                            let ptr = base_ptr.add((row_start + r + unroll_idx) * stride + col_idx);
+                            for v in 0..vec_count {
+                                let offset = v * LANES_F32;
+                                let vec = vld1q_f32(ptr.add(offset));
+                                vec_acc[v] = vaddq_f32(vec_acc[v], vec);
+                            }
+                            if tail > 0 {
+                                let ptr_tail = base_ptr.add((row_start + r + unroll_idx) * stride + col_idx);
+                                for t in 0..tail {
+                                    tail_acc[t] += *ptr_tail.add(tail_start + t);
+                                }
+                            }
+                        }
+                        r += UNROLL_FACTOR_2048_F32;
+                    }
+
+                    // Handle remaining rows
+                    while r < block_rows {
+                        let ptr = base_ptr.add((row_start + r) * stride + col_idx);
+                        for v in 0..vec_count {
+                            let offset = v * LANES_F32;
+                            let vec = vld1q_f32(ptr.add(offset));
+                            vec_acc[v] = vaddq_f32(vec_acc[v], vec);
+                        }
+                        if tail > 0 {
+                            for t in 0..tail {
+                                tail_acc[t] += *ptr.add(tail_start + t);
+                            }
+                        }
+                        r += 1;
+                    }
+
+                    // Write results
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        let out_dst = out.as_mut_ptr().add(col_idx);
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) out_dst,
+                            options(readonly, nostack)
+                        );
+                    }
+
+                    for v in 0..vec_count {
+                        let dst = out.as_mut_ptr().add(col_idx + v * LANES_F32);
+                        let prev = vld1q_f32(dst);
+                        let sum = vaddq_f32(prev, vec_acc[v]);
+                        vst1q_f32(dst, sum);
+                    }
+                    if tail > 0 {
+                        for t in 0..tail {
+                            let idx = col_idx + tail_start + t;
+                            *out.get_unchecked_mut(idx) += tail_acc[t];
+                        }
+                    }
+
+                    col_idx += width;
+                }
+                row_start += block_rows;
+            }
+            return out;
+        }
+
         // For large matrices (>=512² including 2048²), use tiled approach for better cache locality
         // This processes data in blocks to keep working set in L1/L2 cache
+        // Optimized tile sizes for ARM64: 32KB L1 cache, 64-byte cache lines
+        // Row tile of 128 rows * 64 cols * 4 bytes = 32KB (fits in L1)
         const ROW_TILE_F32: usize = 128; // Process 128 rows at a time (L1 cache friendly)
         const COL_TILE_F32: usize = 64; // Process 64 columns at a time (fits in L1 cache ~16KB)
         const MAX_TILE_VECTORS_F32: usize = COL_TILE_F32 / LANES_F32;
@@ -1966,6 +2169,9 @@ mod neon {
                     let mut vec_acc = [vdupq_n_f32(0.0); MAX_TILE_VECTORS_F32];
                     let mut tail_acc = [0.0f32; LANES_F32];
 
+                    // Simple row-by-row processing (baseline - optimized output writes)
+                    // Compiler already optimizes to 16-column parallelism automatically
+                    // Hardware prefetcher handles memory prefetching efficiently
                     let mut r = 0usize;
                     while r < block_rows {
                         let ptr = base_ptr.add((row_start + r) * stride + col_idx);
@@ -1982,16 +2188,36 @@ mod neon {
                         r += 1;
                     }
 
-                    for v in 0..vec_count {
-                        let dst = out.as_mut_ptr().add(col_idx + v * LANES_F32);
-                        let prev = vld1q_f32(dst);
-                        let sum = vaddq_f32(prev, vec_acc[v]);
-                        vst1q_f32(dst, sum);
+                    // Write results - optimized: for tiled path, we accumulate across row tiles
+                    // Each tile processes different rows, so we accumulate in output buffer
+                    // Avoid unnecessary loads: check if first row tile for this column
+                    if row_start == 0 {
+                        // First tile in this column: write directly
+                        for v in 0..vec_count {
+                            vst1q_f32(out.as_mut_ptr().add(col_idx + v * LANES_F32), vec_acc[v]);
+                        }
+                    } else {
+                        // Subsequent row tiles: accumulate with previous
+                        for v in 0..vec_count {
+                            let dst = out.as_mut_ptr().add(col_idx + v * LANES_F32);
+                            let prev = vld1q_f32(dst);
+                            let sum = vaddq_f32(prev, vec_acc[v]);
+                            vst1q_f32(dst, sum);
+                        }
                     }
                     if tail > 0 {
-                        for t in 0..tail {
-                            let idx = col_idx + tail_start + t;
-                            *out.get_unchecked_mut(idx) += tail_acc[t];
+                        if row_start == 0 {
+                            // First tile: write directly
+                            for t in 0..tail {
+                                let idx = col_idx + tail_start + t;
+                                *out.get_unchecked_mut(idx) = tail_acc[t];
+                            }
+                        } else {
+                            // Subsequent tiles: accumulate
+                            for t in 0..tail {
+                                let idx = col_idx + tail_start + t;
+                                *out.get_unchecked_mut(idx) += tail_acc[t];
+                            }
                         }
                     }
 
@@ -2165,6 +2391,7 @@ mod neon {
     #[target_feature(enable = "neon")]
     pub unsafe fn reduce_axis0_columns_f64(data: &[f64], rows: usize, cols: usize) -> Vec<f64> {
         debug_assert_eq!(rows.saturating_mul(cols), data.len());
+        let debug = std::env::var("RAPTORS_DEBUG_AXIS0").is_ok();
         let mut out = vec![0.0f64; cols];
         if rows == 0 || cols == 0 {
             return out;
@@ -2173,11 +2400,149 @@ mod neon {
         let base_ptr = data.as_ptr();
         let out_ptr = out.as_mut_ptr();
 
+        // Specialized path for exactly 2048x2048: optimized tile sizes for this specific dimension
+        if rows == 2048 && cols == 2048 {
+            if debug {
+                eprintln!("[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path");
+            }
+            // Optimized tile sizes for 2048x2048 float64: larger tiles fit well in L2
+            // Row tile of 256 rows * 128 cols * 8 bytes = 256KB (reasonable for L2)
+            const ROW_TILE_2048_F64: usize = 256; // Process 256 rows at a time
+            const COL_TILE_2048_F64: usize = 128; // Process 128 columns at a time
+            const MAX_TILE_VECTORS_2048_F64: usize = COL_TILE_2048_F64 / LANES_F64;
+            const UNROLL_FACTOR_2048_F64: usize = 4; // Unroll 4x
+
+            let mut row_start = 0usize;
+            while row_start < rows {
+                let block_rows = (rows - row_start).min(ROW_TILE_2048_F64);
+                let mut col = 0usize;
+                while col < cols {
+                    let width = (cols - col).min(COL_TILE_2048_F64);
+                    let vec_count = width / LANES_F64;
+                    let tail_start = vec_count * LANES_F64;
+                    let tail = width - tail_start;
+                    let mut vec_acc = [vdupq_n_f64(0.0); MAX_TILE_VECTORS_2048_F64];
+                    let mut tail_acc = [0.0f64; LANES_F64];
+
+                    // Aggressive prefetching for specialized path
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        let first_row_ptr = base_ptr.add(row_start * stride + col);
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) first_row_ptr,
+                            options(readonly, nostack)
+                        );
+                        if row_start + ROW_TILE_2048_F64 < rows {
+                            let next_tile_ptr = base_ptr.add((row_start + ROW_TILE_2048_F64) * stride + col);
+                            core::arch::asm!(
+                                "prfm pldl2keep, [{addr}]",
+                                addr = in(reg) next_tile_ptr,
+                                options(readonly, nostack)
+                            );
+                        }
+                        if col + COL_TILE_2048_F64 < cols {
+                            let next_col_ptr = base_ptr.add(row_start * stride + col + COL_TILE_2048_F64);
+                            core::arch::asm!(
+                                "prfm pldl2keep, [{addr}]",
+                                addr = in(reg) next_col_ptr,
+                                options(readonly, nostack)
+                            );
+                        }
+                        let out_prefetch_ptr = out_ptr.add(col);
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) out_prefetch_ptr,
+                            options(readonly, nostack)
+                        );
+                    }
+
+                    // Unroll inner row loop
+                    let mut r = 0usize;
+                    while r + UNROLL_FACTOR_2048_F64 <= block_rows {
+                        #[cfg(target_arch = "aarch64")]
+                        {
+                            let prefetch_ptr = base_ptr.add((row_start + r + UNROLL_FACTOR_2048_F64 * 4) * stride + col);
+                            core::arch::asm!(
+                                "prfm pldl1keep, [{addr}]",
+                                addr = in(reg) prefetch_ptr,
+                                options(readonly, nostack)
+                            );
+                        }
+
+                        for unroll_idx in 0..UNROLL_FACTOR_2048_F64 {
+                            let ptr = base_ptr.add((row_start + r + unroll_idx) * stride + col);
+                            for v in 0..vec_count {
+                                let offset = v * LANES_F64;
+                                let vec = vld1q_f64(ptr.add(offset));
+                                vec_acc[v] = vaddq_f64(vec_acc[v], vec);
+                            }
+                            if tail > 0 {
+                                let ptr_tail = base_ptr.add((row_start + r + unroll_idx) * stride + col);
+                                for t in 0..tail {
+                                    tail_acc[t] += *ptr_tail.add(tail_start + t);
+                                }
+                            }
+                        }
+                        r += UNROLL_FACTOR_2048_F64;
+                    }
+
+                    // Handle remaining rows
+                    while r < block_rows {
+                        let ptr = base_ptr.add((row_start + r) * stride + col);
+                        for v in 0..vec_count {
+                            let offset = v * LANES_F64;
+                            let vec = vld1q_f64(ptr.add(offset));
+                            vec_acc[v] = vaddq_f64(vec_acc[v], vec);
+                        }
+                        if tail > 0 {
+                            for t in 0..tail {
+                                tail_acc[t] += *ptr.add(tail_start + t);
+                            }
+                        }
+                        r += 1;
+                    }
+
+                    // Write results with prefetch
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        let out_dst = out_ptr.add(col);
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) out_dst,
+                            options(readonly, nostack)
+                        );
+                    }
+
+                    for v in 0..vec_count {
+                        let dst = out_ptr.add(col + v * LANES_F64);
+                        let prev = vld1q_f64(dst);
+                        let sum = vaddq_f64(prev, vec_acc[v]);
+                        vst1q_f64(dst, sum);
+                    }
+                    if tail > 0 {
+                        for t in 0..tail {
+                            let idx = col + tail_start + t;
+                            *out_ptr.add(idx) += tail_acc[t];
+                        }
+                    }
+
+                    col += width;
+                }
+                row_start += block_rows;
+            }
+            return out;
+        }
+
         // For large matrices (>=512²), use tiled approach for better cache locality
         // This processes data in blocks to keep working set in L1/L2 cache
+        // Optimized tile sizes for ARM64: 32KB L1 cache, 64-byte cache lines
+        // Row tile of 128 rows * 64 cols * 8 bytes = 64KB (needs L2, but reasonable)
+        // For 2048x2048, we'll use a specialized path with better tile sizes
         const ROW_TILE_F64: usize = 128; // Process 128 rows at a time (L1 cache friendly)
         const COL_TILE_F64: usize = 64; // Process 64 columns at a time (fits in L1 cache ~16KB)
         const MAX_TILE_VECTORS_F64: usize = COL_TILE_F64 / LANES_F64;
+        const UNROLL_FACTOR_TILED_F64: usize = 4; // Unroll inner row loop 4x for better ILP
 
         if rows >= 512 && cols >= 512 {
             // Tiled reduction for large matrices - more cache-friendly than columnar
@@ -2193,7 +2558,64 @@ mod neon {
                     let mut vec_acc = [vdupq_n_f64(0.0); MAX_TILE_VECTORS_F64];
                     let mut tail_acc = [0.0f64; LANES_F64];
 
+                    // Prefetch first row of this tile and next tile
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        let first_row_ptr = base_ptr.add(row_start * stride + col);
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) first_row_ptr,
+                            options(readonly, nostack)
+                        );
+                        if row_start + ROW_TILE_F64 < rows {
+                            let next_tile_ptr = base_ptr.add((row_start + ROW_TILE_F64) * stride + col);
+                            core::arch::asm!(
+                                "prfm pldl2keep, [{addr}]",
+                                addr = in(reg) next_tile_ptr,
+                                options(readonly, nostack)
+                            );
+                        }
+                        // Prefetch output buffer for this column tile
+                        let out_prefetch_ptr = out_ptr.add(col);
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) out_prefetch_ptr,
+                            options(readonly, nostack)
+                        );
+                    }
+
+                    // Unroll inner row loop for better instruction-level parallelism
                     let mut r = 0usize;
+                    while r + UNROLL_FACTOR_TILED_F64 <= block_rows {
+                        // Prefetch ahead for the next unrolled iterations
+                        #[cfg(target_arch = "aarch64")]
+                        {
+                            let prefetch_ptr = base_ptr.add((row_start + r + UNROLL_FACTOR_TILED_F64 * 2) * stride + col);
+                            core::arch::asm!(
+                                "prfm pldl1keep, [{addr}]",
+                                addr = in(reg) prefetch_ptr,
+                                options(readonly, nostack)
+                            );
+                        }
+
+                        // Unroll 4 iterations
+                        for unroll_idx in 0..UNROLL_FACTOR_TILED_F64 {
+                            let ptr = base_ptr.add((row_start + r + unroll_idx) * stride + col);
+                            for v in 0..vec_count {
+                                let offset = v * LANES_F64;
+                                let vec = vld1q_f64(ptr.add(offset));
+                                vec_acc[v] = vaddq_f64(vec_acc[v], vec);
+                            }
+                            if tail > 0 {
+                                for t in 0..tail {
+                                    tail_acc[t] += *ptr.add(tail_start + t);
+                                }
+                            }
+                        }
+                        r += UNROLL_FACTOR_TILED_F64;
+                    }
+
+                    // Handle remaining rows without unrolling
                     while r < block_rows {
                         let ptr = base_ptr.add((row_start + r) * stride + col);
                         for v in 0..vec_count {

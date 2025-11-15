@@ -1,0 +1,28 @@
+0000000000059760 <byte_sum_of_products_one>:
+   59760:	a9400025 	ldp	x5, x0, [x1]
+   59764:	d1000464 	sub	x4, x3, #0x1
+   59768:	a9401842 	ldp	x2, x6, [x2]
+   5976c:	b4000183 	cbz	x3, 5979c <byte_sum_of_products_one+0x3c>
+   59770:	f10004df 	cmp	x6, #0x1
+   59774:	fa410840 	ccmp	x2, #0x1, #0x0, eq  // eq = none
+   59778:	54000141 	b.ne	597a0 <byte_sum_of_products_one+0x40>  // b.any
+   5977c:	d503201f 	nop
+   59780:	39400001 	ldrb	w1, [x0]
+   59784:	d1000484 	sub	x4, x4, #0x1
+   59788:	384014a2 	ldrb	w2, [x5], #1
+   5978c:	0b020021 	add	w1, w1, w2
+   59790:	38001401 	strb	w1, [x0], #1
+   59794:	b100049f 	cmn	x4, #0x1
+   59798:	54ffff41 	b.ne	59780 <byte_sum_of_products_one+0x20>  // b.any
+   5979c:	d65f03c0 	ret
+   597a0:	394000a1 	ldrb	w1, [x5]
+   597a4:	d1000484 	sub	x4, x4, #0x1
+   597a8:	39400003 	ldrb	w3, [x0]
+   597ac:	8b0200a5 	add	x5, x5, x2
+   597b0:	0b030021 	add	w1, w1, w3
+   597b4:	39000001 	strb	w1, [x0]
+   597b8:	8b060000 	add	x0, x0, x6
+   597bc:	b100049f 	cmn	x4, #0x1
+   597c0:	54ffff01 	b.ne	597a0 <byte_sum_of_products_one+0x40>  // b.any
+   597c4:	17fffff6 	b	5979c <byte_sum_of_products_one+0x3c>
+

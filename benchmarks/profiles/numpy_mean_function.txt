@@ -1,0 +1,200 @@
+  1657fc:	d503201f 	nop
+
+0000000000165800 <PyArray_Mean>:
+  165800:	a9bb7bfd 	stp	x29, x30, [sp, #-80]!
+  165804:	910003fd 	mov	x29, sp
+  165808:	a90153f3 	stp	x19, x20, [sp, #16]
+  16580c:	2a0203f4 	mov	w20, w2
+  165810:	52800002 	mov	w2, #0x0                   	// #0
+  165814:	a9025bf5 	stp	x21, x22, [sp, #32]
+  165818:	aa0303f6 	mov	x22, x3
+  16581c:	b9004fe1 	str	w1, [sp, #76]
+  165820:	910133e1 	add	x1, sp, #0x4c
+  165824:	94005cf3 	bl	17cbf0 <PyArray_CheckAxis>
+  165828:	b4000aa0 	cbz	x0, 16597c <PyArray_Mean+0x17c>
+  16582c:	f9001bf7 	str	x23, [sp, #48]
+  165830:	b0001c97 	adrp	x23, 4f6000 <npy_static_cdata+0x5f0>
+  165834:	b9404fe2 	ldr	w2, [sp, #76]
+  165838:	aa0003f3 	mov	x19, x0
+  16583c:	f9414ae1 	ldr	x1, [x23, #656]
+  165840:	2a1403e3 	mov	w3, w20
+  165844:	aa1603e4 	mov	x4, x22
+  165848:	9401fbb6 	bl	1e4720 <PyArray_GenericReduceFunction>
+  16584c:	aa0003f5 	mov	x21, x0
+  165850:	f9401261 	ldr	x1, [x19, #32]
+  165854:	b9804fe0 	ldrsw	x0, [sp, #76]
+  165858:	fc607820 	ldr	d0, [x1, x0, lsl #3]
+  16585c:	5e61d800 	scvtf	d0, d0
+  165860:	97fb2c90 	bl	30aa0 <PyFloat_FromDouble@plt>
+  165864:	aa0003f4 	mov	x20, x0
+  165868:	f9400261 	ldr	x1, [x19]
+  16586c:	d1000420 	sub	x0, x1, #0x1
+  165870:	f9000260 	str	x0, [x19]
+  165874:	b4000640 	cbz	x0, 16593c <PyArray_Mean+0x13c>
+  165878:	f10002bf 	cmp	x21, #0x0
+  16587c:	fa401a84 	ccmp	x20, #0x0, #0x4, ne  // ne = any
+  165880:	54000680 	b.eq	165950 <PyArray_Mean+0x150>  // b.none
+  165884:	b4000316 	cbz	x22, 1658e4 <PyArray_Mean+0xe4>
+  165888:	910a42f7 	add	x23, x23, #0x290
+  16588c:	aa1603e4 	mov	x4, x22
+  165890:	aa1603e2 	mov	x2, x22
+  165894:	aa1403e3 	mov	x3, x20
+  165898:	f00013e1 	adrp	x1, 3e4000 <_fini+0xdb50>
+  16589c:	91262021 	add	x1, x1, #0x988
+  1658a0:	f9400ee0 	ldr	x0, [x23, #24]
+  1658a4:	97fb30df 	bl	31c20 <_PyObject_CallFunction_SizeT@plt>
+  1658a8:	aa0003f3 	mov	x19, x0
+  1658ac:	f94002a1 	ldr	x1, [x21]
+  1658b0:	d1000421 	sub	x1, x1, #0x1
+  1658b4:	f90002a1 	str	x1, [x21]
+  1658b8:	b4000261 	cbz	x1, 165904 <PyArray_Mean+0x104>
+  1658bc:	f9400281 	ldr	x1, [x20]
+  1658c0:	d1000421 	sub	x1, x1, #0x1
+  1658c4:	f9000281 	str	x1, [x20]
+  1658c8:	b40002a1 	cbz	x1, 16591c <PyArray_Mean+0x11c>
+  1658cc:	f9401bf7 	ldr	x23, [sp, #48]
+  1658d0:	aa1303e0 	mov	x0, x19
+  1658d4:	a94153f3 	ldp	x19, x20, [sp, #16]
+  1658d8:	a9425bf5 	ldp	x21, x22, [sp, #32]
+  1658dc:	a8c57bfd 	ldp	x29, x30, [sp], #80
+  1658e0:	d65f03c0 	ret
+  1658e4:	aa1403e1 	mov	x1, x20
+  1658e8:	aa1503e0 	mov	x0, x21
+  1658ec:	97fb2d55 	bl	30e40 <PyNumber_TrueDivide@plt>
+  1658f0:	aa0003f3 	mov	x19, x0
+  1658f4:	f94002a1 	ldr	x1, [x21]
+  1658f8:	d1000421 	sub	x1, x1, #0x1
+  1658fc:	f90002a1 	str	x1, [x21]
+  165900:	b5fffde1 	cbnz	x1, 1658bc <PyArray_Mean+0xbc>
+  165904:	aa1503e0 	mov	x0, x21
+  165908:	97fb2c9a 	bl	30b70 <_Py_Dealloc@plt>
+  16590c:	f9400281 	ldr	x1, [x20]
+  165910:	d1000421 	sub	x1, x1, #0x1
+  165914:	f9000281 	str	x1, [x20]
+  165918:	b5fffda1 	cbnz	x1, 1658cc <PyArray_Mean+0xcc>
+  16591c:	aa1403e0 	mov	x0, x20
+  165920:	97fb2c94 	bl	30b70 <_Py_Dealloc@plt>
+  165924:	f9401bf7 	ldr	x23, [sp, #48]
+  165928:	aa1303e0 	mov	x0, x19
+  16592c:	a94153f3 	ldp	x19, x20, [sp, #16]
+  165930:	a9425bf5 	ldp	x21, x22, [sp, #32]
+  165934:	a8c57bfd 	ldp	x29, x30, [sp], #80
+  165938:	d65f03c0 	ret
+  16593c:	aa1303e0 	mov	x0, x19
+  165940:	97fb2c8c 	bl	30b70 <_Py_Dealloc@plt>
+  165944:	f10002bf 	cmp	x21, #0x0
+  165948:	fa401a84 	ccmp	x20, #0x0, #0x4, ne  // ne = any
+  16594c:	54fff9c1 	b.ne	165884 <PyArray_Mean+0x84>  // b.any
+  165950:	b40000b5 	cbz	x21, 165964 <PyArray_Mean+0x164>
+  165954:	f94002a0 	ldr	x0, [x21]
+  165958:	d1000400 	sub	x0, x0, #0x1
+  16595c:	f90002a0 	str	x0, [x21]
+  165960:	b4000240 	cbz	x0, 1659a8 <PyArray_Mean+0x1a8>
+  165964:	b40000b4 	cbz	x20, 165978 <PyArray_Mean+0x178>
+  165968:	f9400280 	ldr	x0, [x20]
+  16596c:	d1000400 	sub	x0, x0, #0x1
+  165970:	f9000280 	str	x0, [x20]
+  165974:	b4000100 	cbz	x0, 165994 <PyArray_Mean+0x194>
+  165978:	f9401bf7 	ldr	x23, [sp, #48]
+  16597c:	d2800013 	mov	x19, #0x0                   	// #0
+  165980:	a9425bf5 	ldp	x21, x22, [sp, #32]
+  165984:	aa1303e0 	mov	x0, x19
+  165988:	a94153f3 	ldp	x19, x20, [sp, #16]
+  16598c:	a8c57bfd 	ldp	x29, x30, [sp], #80
+--
+  165a04:	d2800003 	mov	x3, #0x0                   	// #0
+  165a08:	aa0003f3 	mov	x19, x0
+  165a0c:	97ffff7d 	bl	165800 <PyArray_Mean>
+  165a10:	94005cf0 	bl	17cdd0 <PyArray_EnsureAnyArray>
+  165a14:	aa0003f7 	mov	x23, x0
+  165a18:	b4002240 	cbz	x0, 165e60 <__New_PyArray_Std+0x4a0>
+  165a1c:	a9025bf5 	stp	x21, x22, [sp, #32]
+  165a20:	b9401a7c 	ldr	w28, [x19, #24]
+  165a24:	93407f94 	sxtw	x20, w28
+  165a28:	aa1403e0 	mov	x0, x20
+  165a2c:	97fb2b0d 	bl	30660 <PyTuple_New@plt>
+  165a30:	aa0003f6 	mov	x22, x0
+  165a34:	b4001740 	cbz	x0, 165d1c <__New_PyArray_Std+0x35c>
+  165a38:	91006015 	add	x21, x0, #0x18
+  165a3c:	d2800019 	mov	x25, #0x0                   	// #0
+  165a40:	7100039f 	cmp	w28, #0x0
+  165a44:	5400016d 	b.le	165a70 <__New_PyArray_Std+0xb0>
+  165a48:	b9406fe0 	ldr	w0, [sp, #108]
+  165a4c:	6b19001f 	cmp	w0, w25
+  165a50:	54001480 	b.eq	165ce0 <__New_PyArray_Std+0x320>  // b.none
+  165a54:	f9401260 	ldr	x0, [x19, #32]
+  165a58:	f8795800 	ldr	x0, [x0, w25, uxtw #3]
+  165a5c:	97fb29b5 	bl	30130 <PyLong_FromSsize_t@plt>
+  165a60:	f8397aa0 	str	x0, [x21, x25, lsl #3]
+  165a64:	91000739 	add	x25, x25, #0x1
+  165a68:	eb14033f 	cmp	x25, x20
+  165a6c:	54fffee1 	b.ne	165a48 <__New_PyArray_Std+0x88>  // b.any
+  165a70:	aa1603e1 	mov	x1, x22
+  165a74:	aa1703e0 	mov	x0, x23
+  165a78:	9402091c 	bl	1e7ee8 <PyArray_Reshape>
+  165a7c:	aa0003f5 	mov	x21, x0
+  165a80:	f94002e1 	ldr	x1, [x23]
+  165a84:	d1000420 	sub	x0, x1, #0x1
+  165a88:	f90002e0 	str	x0, [x23]
+  165a8c:	b4001700 	cbz	x0, 165d6c <__New_PyArray_Std+0x3ac>
+  165a90:	f94002c0 	ldr	x0, [x22]
+  165a94:	d1000400 	sub	x0, x0, #0x1
+  165a98:	f90002c0 	str	x0, [x22]
+  165a9c:	b4001620 	cbz	x0, 165d60 <__New_PyArray_Std+0x3a0>
+  165aa0:	b4001475 	cbz	x21, 165d2c <__New_PyArray_Std+0x36c>
+  165aa4:	aa1503e1 	mov	x1, x21
+  165aa8:	aa1303e0 	mov	x0, x19
+  165aac:	97fb317d 	bl	320a0 <PyNumber_Subtract@plt>
+  165ab0:	94005cc8 	bl	17cdd0 <PyArray_EnsureAnyArray>
+  165ab4:	aa0003f4 	mov	x20, x0
+  165ab8:	f94002a1 	ldr	x1, [x21]
+  165abc:	d1000420 	sub	x0, x1, #0x1
+  165ac0:	f90002a0 	str	x0, [x21]
+  165ac4:	b4001620 	cbz	x0, 165d88 <__New_PyArray_Std+0x3c8>
+  165ac8:	b4001334 	cbz	x20, 165d2c <__New_PyArray_Std+0x36c>
+  165acc:	f9401e80 	ldr	x0, [x20, #56]
+  165ad0:	b9401c00 	ldr	w0, [x0, #28]
+  165ad4:	51003800 	sub	w0, w0, #0xe
+  165ad8:	7100081f 	cmp	w0, #0x2
+  165adc:	540019a9 	b.ls	165e10 <__New_PyArray_Std+0x450>  // b.plast
+  165ae0:	f9400280 	ldr	x0, [x20]
+  165ae4:	aa1403f7 	mov	x23, x20
+  165ae8:	b0001c96 	adrp	x22, 4f6000 <npy_static_cdata+0x5f0>
+  165aec:	91000400 	add	x0, x0, #0x1
+  165af0:	f9000280 	str	x0, [x20]
+  165af4:	910a42c2 	add	x2, x22, #0x290
+  165af8:	aa1703e1 	mov	x1, x23
+  165afc:	aa1403e0 	mov	x0, x20
+  165b00:	f9400842 	ldr	x2, [x2, #16]
+  165b04:	9401fbcf 	bl	1e4a40 <PyArray_GenericBinaryFunction>
+  165b08:	94005cb2 	bl	17cdd0 <PyArray_EnsureAnyArray>
+  165b0c:	aa0003f5 	mov	x21, x0
+  165b10:	f9400282 	ldr	x2, [x20]
+  165b14:	d1000442 	sub	x2, x2, #0x1
+  165b18:	f9000282 	str	x2, [x20]
+  165b1c:	b40018a2 	cbz	x2, 165e30 <__New_PyArray_Std+0x470>
+  165b20:	f94002e2 	ldr	x2, [x23]
+  165b24:	d1000442 	sub	x2, x2, #0x1
+  165b28:	f90002e2 	str	x2, [x23]
+  165b2c:	b4001342 	cbz	x2, 165d94 <__New_PyArray_Std+0x3d4>
+  165b30:	b4000ff5 	cbz	x21, 165d2c <__New_PyArray_Std+0x36c>
+  165b34:	f9401ea0 	ldr	x0, [x21, #56]
+  165b38:	b9401c00 	ldr	w0, [x0, #28]
+  165b3c:	51003800 	sub	w0, w0, #0xe
+  165b40:	7100081f 	cmp	w0, #0x2
+  165b44:	54001ae9 	b.ls	165ea0 <__New_PyArray_Std+0x4e0>  // b.plast
+  165b48:	f94002a0 	ldr	x0, [x21]
+  165b4c:	aa1503f4 	mov	x20, x21
+  165b50:	91000400 	add	x0, x0, #0x1
+  165b54:	f90002a0 	str	x0, [x21]
+  165b58:	f9414ac1 	ldr	x1, [x22, #656]
+  165b5c:	2a1803e3 	mov	w3, w24
+  165b60:	b9406fe2 	ldr	w2, [sp, #108]
+  165b64:	aa1403e0 	mov	x0, x20
+  165b68:	d2800004 	mov	x4, #0x0                   	// #0
+  165b6c:	9401faed 	bl	1e4720 <PyArray_GenericReduceFunction>
+  165b70:	aa0003f7 	mov	x23, x0
+  165b74:	f9400281 	ldr	x1, [x20]
+  165b78:	d1000421 	sub	x1, x1, #0x1
+  165b7c:	f9000281 	str	x1, [x20]
+  165b80:	b4001641 	cbz	x1, 165e48 <__New_PyArray_Std+0x488>

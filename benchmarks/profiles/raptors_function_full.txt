@@ -1,0 +1,500 @@
+   948e0:	d103c3ff 	sub	sp, sp, #0xf0
+   948e4:	a9097bfd 	stp	x29, x30, [sp, #144]
+   948e8:	a90a6ffc 	stp	x28, x27, [sp, #160]
+   948ec:	a90b67fa 	stp	x26, x25, [sp, #176]
+   948f0:	a90c5ff8 	stp	x24, x23, [sp, #192]
+   948f4:	a90d57f6 	stp	x22, x21, [sp, #208]
+   948f8:	a90e4ff4 	stp	x20, x19, [sp, #224]
+   948fc:	910243fd 	add	x29, sp, #0x90
+   94900:	b4000664 	cbz	x4, 949cc <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xec>
+   94904:	9bc47c68 	umulh	x8, x3, x4
+   94908:	eb0803ff 	cmp	xzr, x8
+   9490c:	54000681 	b.ne	949dc <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xfc>  // b.any
+   94910:	9b047c68 	mul	x8, x3, x4
+   94914:	eb02011f 	cmp	x8, x2
+   94918:	54000621 	b.ne	949dc <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xfc>  // b.any
+   9491c:	aa0003f9 	mov	x25, x0
+   94920:	b4000643 	cbz	x3, 949e8 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x108>
+   94924:	aa0103f6 	mov	x22, x1
+   94928:	f00002c0 	adrp	x0, ef000 <anon.b6fadd719fc531a9332e293037d4924f.7.llvm.10000810581367883320+0x319>
+   9492c:	912b0400 	add	x0, x0, #0xac1
+   94930:	9100a3e8 	add	x8, sp, #0x28
+   94934:	52800261 	mov	w1, #0x13                  	// #19
+   94938:	aa0203f3 	mov	x19, x2
+   9493c:	a90193e3 	stp	x3, x4, [sp, #24]
+   94940:	9400d571 	bl	c9f04 <_ZN3std3env7_var_os17he89af6db97775371E>
+   94944:	f94017f5 	ldr	x21, [sp, #40]
+   94948:	d2f00008 	mov	x8, #0x8000000000000000    	// #-9223372036854775808
+   9494c:	eb0802bf 	cmp	x21, x8
+   94950:	54000140 	b.eq	94978 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x98>  // b.none
+   94954:	a94307f4 	ldp	x20, x1, [sp, #48]
+   94958:	d100c3a8 	sub	x8, x29, #0x30
+   9495c:	aa1403e0 	mov	x0, x20
+   94960:	97fe696d 	bl	2ef14 <_ZN4core3str8converts9from_utf817he2f665d2623249dbE>
+   94964:	f85d03a9 	ldur	x9, [x29, #-48]
+   94968:	b40005e9 	cbz	x9, 94a24 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x144>
+   9496c:	b4000075 	cbz	x21, 94978 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x98>
+   94970:	aa1403e0 	mov	x0, x20
+   94974:	97fde18b 	bl	cfa0 <free@plt>
+   94978:	2a1f03f3 	mov	w19, wzr
+   9497c:	f94013f5 	ldr	x21, [sp, #32]
+   94980:	aa1f03e0 	mov	x0, xzr
+   94984:	d37efea8 	lsr	x8, x21, #62
+   94988:	d37ef6a1 	lsl	x1, x21, #2
+   9498c:	b5000888 	cbnz	x8, 94a9c <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x1bc>
+   94990:	b27ef3e8 	mov	x8, #0x7ffffffffffffffc    	// #9223372036854775804
+   94994:	eb08003f 	cmp	x1, x8
+   94998:	54000828 	b.hi	94a9c <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x1bc>  // b.pmore
+   9499c:	b4000861 	cbz	x1, 94aa8 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x1c8>
+   949a0:	aa0103f7 	mov	x23, x1
+   949a4:	aa0103e0 	mov	x0, x1
+   949a8:	52800021 	mov	w1, #0x1                   	// #1
+   949ac:	97fde139 	bl	ce90 <calloc@plt>
+   949b0:	b4005200 	cbz	x0, 953f0 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xb10>
+   949b4:	aa0003f4 	mov	x20, x0
+   949b8:	a90057f9 	stp	x25, x21, [sp]
+   949bc:	f9400ff8 	ldr	x24, [sp, #24]
+   949c0:	f108031f 	cmp	x24, #0x200
+   949c4:	540007c2 	b.cs	94abc <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x1dc>  // b.hs, b.nlast
+   949c8:	14000181 	b	94fcc <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x6ec>
+   949cc:	52800088 	mov	w8, #0x4                   	// #4
+   949d0:	f900081f 	str	xzr, [x0, #16]
+   949d4:	a900201f 	stp	xzr, x8, [x0]
+   949d8:	14000271 	b	9539c <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xabc>
+   949dc:	d2f00008 	mov	x8, #0x8000000000000000    	// #-9223372036854775808
+   949e0:	f9000008 	str	x8, [x0]
+   949e4:	1400026e 	b	9539c <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xabc>
+   949e8:	d37efc88 	lsr	x8, x4, #62
+   949ec:	d37ef494 	lsl	x20, x4, #2
+   949f0:	aa1f03e0 	mov	x0, xzr
+   949f4:	b50050a8 	cbnz	x8, 95408 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xb28>
+   949f8:	b27ef3e8 	mov	x8, #0x7ffffffffffffffc    	// #9223372036854775804
+   949fc:	eb08029f 	cmp	x20, x8
+   94a00:	54005048 	b.hi	95408 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xb28>  // b.pmore
+   94a04:	aa1403e0 	mov	x0, x20
+   94a08:	52800021 	mov	w1, #0x1                   	// #1
+   94a0c:	aa0403f3 	mov	x19, x4
+   94a10:	97fde120 	bl	ce90 <calloc@plt>
+   94a14:	b4004f80 	cbz	x0, 95404 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xb24>
+   94a18:	a9000333 	stp	x19, x0, [x25]
+   94a1c:	f9000b33 	str	x19, [x25, #16]
+   94a20:	1400025f 	b	9539c <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xabc>
+   94a24:	aa1303e8 	mov	x8, x19
+   94a28:	b4000095 	cbz	x21, 94a38 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x158>
+   94a2c:	aa1403e0 	mov	x0, x20
+   94a30:	97fde15c 	bl	cfa0 <free@plt>
+   94a34:	aa1303e8 	mov	x8, x19
+   94a38:	f81c83a8 	stur	x8, [x29, #-56]
+   94a3c:	d0000529 	adrp	x9, 13a000 <anon.387c12cf3cacda01d7423a41780bb805.629.llvm.14915154030188578515+0x258>
+   94a40:	910063e8 	add	x8, sp, #0x18
+   94a44:	f9472529 	ldr	x9, [x9, #3656]
+   94a48:	9100a3e0 	add	x0, sp, #0x28
+   94a4c:	a93d27a8 	stp	x8, x9, [x29, #-48]
+   94a50:	910083e8 	add	x8, sp, #0x20
+   94a54:	a93e27a8 	stp	x8, x9, [x29, #-32]
+   94a58:	d100e3a8 	sub	x8, x29, #0x38
+   94a5c:	a93f27a8 	stp	x8, x9, [x29, #-16]
+   94a60:	f0000508 	adrp	x8, 137000 <_ZN7raptors162_$LT$impl$u20$pyo3..impl_..pyclass..PyMethods$LT$raptors..RustArrayI32$GT$$u20$for$u20$pyo3..impl_..pyclass..PyClassImplCollector$LT$raptors..RustArrayI32$GT$$GT$10py_methods5ITEMS17h529e6d72a33d554dE+0x1588>
+   94a64:	91212108 	add	x8, x8, #0x848
+   94a68:	52800089 	mov	w9, #0x4                   	// #4
+   94a6c:	a902a7e8 	stp	x8, x9, [sp, #40]
+   94a70:	d100c3a8 	sub	x8, x29, #0x30
+   94a74:	52800069 	mov	w9, #0x3                   	// #3
+   94a78:	f9001fe8 	str	x8, [sp, #56]
+   94a7c:	a9047fe9 	stp	x9, xzr, [sp, #64]
+   94a80:	9400d398 	bl	c98e0 <_ZN3std2io5stdio7_eprint17h37b43552535b9420E>
+   94a84:	52800033 	mov	w19, #0x1                   	// #1
+   94a88:	f94013f5 	ldr	x21, [sp, #32]
+   94a8c:	aa1f03e0 	mov	x0, xzr
+   94a90:	d37efea8 	lsr	x8, x21, #62
+   94a94:	d37ef6a1 	lsl	x1, x21, #2
+   94a98:	b4fff7c8 	cbz	x8, 94990 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xb0>
+   94a9c:	f0000502 	adrp	x2, 137000 <_ZN7raptors162_$LT$impl$u20$pyo3..impl_..pyclass..PyMethods$LT$raptors..RustArrayI32$GT$$u20$for$u20$pyo3..impl_..pyclass..PyClassImplCollector$LT$raptors..RustArrayI32$GT$$GT$10py_methods5ITEMS17h529e6d72a33d554dE+0x1588>
+   94aa0:	91222042 	add	x2, x2, #0x888
+   94aa4:	97fde1da 	bl	d20c <_ZN5alloc7raw_vec12handle_error17h5fadb201e040df7fE>
+   94aa8:	a9007ff9 	stp	x25, xzr, [sp]
+   94aac:	52800094 	mov	w20, #0x4                   	// #4
+   94ab0:	f9400ff8 	ldr	x24, [sp, #24]
+   94ab4:	f108031f 	cmp	x24, #0x200
+   94ab8:	540028a3 	b.cc	94fcc <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x6ec>  // b.lo, b.ul, b.last
+   94abc:	f107febf 	cmp	x21, #0x1ff
+   94ac0:	54002869 	b.ls	94fcc <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x6ec>  // b.plast
+   94ac4:	aa1503eb 	mov	x11, x21
+   94ac8:	360002b3 	tbz	w19, #0, 94b1c <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x23c>
+   94acc:	d0000529 	adrp	x9, 13a000 <anon.387c12cf3cacda01d7423a41780bb805.629.llvm.14915154030188578515+0x258>
+   94ad0:	910063e8 	add	x8, sp, #0x18
+   94ad4:	f9472529 	ldr	x9, [x9, #3656]
+   94ad8:	a902a7e8 	stp	x8, x9, [sp, #40]
+   94adc:	910083e8 	add	x8, sp, #0x20
+   94ae0:	a903a7e8 	stp	x8, x9, [sp, #56]
+   94ae4:	f0000508 	adrp	x8, 137000 <_ZN7raptors162_$LT$impl$u20$pyo3..impl_..pyclass..PyMethods$LT$raptors..RustArrayI32$GT$$u20$for$u20$pyo3..impl_..pyclass..PyClassImplCollector$LT$raptors..RustArrayI32$GT$$GT$10py_methods5ITEMS17h529e6d72a33d554dE+0x1588>
+   94ae8:	9123a108 	add	x8, x8, #0x8e8
+   94aec:	52800069 	mov	w9, #0x3                   	// #3
+   94af0:	a93d27a8 	stp	x8, x9, [x29, #-48]
+   94af4:	9100a3e8 	add	x8, sp, #0x28
+   94af8:	52800049 	mov	w9, #0x2                   	// #2
+   94afc:	f81e03a8 	stur	x8, [x29, #-32]
+   94b00:	a93effa9 	stp	x9, xzr, [x29, #-24]
+   94b04:	d100c3a0 	sub	x0, x29, #0x30
+   94b08:	9400d376 	bl	c98e0 <_ZN3std2io5stdio7_eprint17h37b43552535b9420E>
+   94b0c:	f9400ff8 	ldr	x24, [sp, #24]
+   94b10:	b4004418 	cbz	x24, 95390 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xab0>
+   94b14:	f94013eb 	ldr	x11, [sp, #32]
+   94b18:	b400428b 	cbz	x11, 95368 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xa88>
+   94b1c:	aa1f03f9 	mov	x25, xzr
+   94b20:	5280081b 	mov	w27, #0x40                  	// #64
+   94b24:	14000005 	b	94b38 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x258>
+   94b28:	a94163e8 	ldp	x8, x24, [sp, #16]
+   94b2c:	8b190119 	add	x25, x8, x25
+   94b30:	eb18033f 	cmp	x25, x24
+   94b34:	540042e2 	b.cs	95390 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0xab0>  // b.hs, b.nlast
+   94b38:	cb190308 	sub	x8, x24, x25
+   94b3c:	52801009 	mov	w9, #0x80                  	// #128
+   94b40:	f102011f 	cmp	x8, #0x80
+   94b44:	9a893108 	csel	x8, x8, x9, cc  // cc = lo, ul, last
+   94b48:	b4ffff2b 	cbz	x11, 94b2c <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x24c>
+   94b4c:	f100051f 	cmp	x8, #0x1
+   94b50:	d37ef73a 	lsl	x26, x25, #2
+   94b54:	aa1f03f7 	mov	x23, xzr
+   94b58:	9a9f8513 	csinc	x19, x8, xzr, hi  // hi = pmore
+   94b5c:	f9000be8 	str	x8, [sp, #16]
+   94b60:	14000008 	b	94b80 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x2a0>
+   94b64:	d37ef502 	lsl	x2, x8, #2
+   94b68:	d100c3a1 	sub	x1, x29, #0x30
+   94b6c:	97fddfbd 	bl	ca60 <memcpy@plt>
+   94b70:	f94013eb 	ldr	x11, [sp, #32]
+   94b74:	8b170397 	add	x23, x28, x23
+   94b78:	eb0b02ff 	cmp	x23, x11
+   94b7c:	54fffd62 	b.cs	94b28 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x248>  // b.hs, b.nlast
+   94b80:	cb170169 	sub	x9, x11, x23
+   94b84:	6f00e417 	movi	v23.2d, #0x0
+   94b88:	6f00e416 	movi	v22.2d, #0x0
+   94b8c:	6f00e415 	movi	v21.2d, #0x0
+   94b90:	6f00e414 	movi	v20.2d, #0x0
+   94b94:	f101013f 	cmp	x9, #0x40
+   94b98:	6f00e413 	movi	v19.2d, #0x0
+   94b9c:	6f00e412 	movi	v18.2d, #0x0
+   94ba0:	9a9b313c 	csel	x28, x9, x27, cc  // cc = lo, ul, last
+   94ba4:	6f00e411 	movi	v17.2d, #0x0
+   94ba8:	6f00e410 	movi	v16.2d, #0x0
+   94bac:	d342ff8a 	lsr	x10, x28, #2
+   94bb0:	6f00e407 	movi	v7.2d, #0x0
+   94bb4:	6f00e406 	movi	v6.2d, #0x0
+   94bb8:	eb19031f 	cmp	x24, x25
+   94bbc:	6f00e405 	movi	v5.2d, #0x0
+   94bc0:	6f00e404 	movi	v4.2d, #0x0
+   94bc4:	92400788 	and	x8, x28, #0x3
+   94bc8:	6f00e403 	movi	v3.2d, #0x0
+   94bcc:	6f00e402 	movi	v2.2d, #0x0
+   94bd0:	a93d7fbf 	stp	xzr, xzr, [x29, #-48]
+   94bd4:	6f00e401 	movi	v1.2d, #0x0
+   94bd8:	6f00e400 	movi	v0.2d, #0x0
+   94bdc:	54000c20 	b.eq	94d60 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x480>  // b.none
+   94be0:	9b0b7f4d 	mul	x13, x26, x11
+   94be4:	f100055f 	cmp	x10, #0x1
+   94be8:	5280010c 	mov	w12, #0x8                   	// #8
+   94bec:	2d7a63b9 	ldp	s25, s24, [x29, #-48]
+   94bf0:	9a9f854e 	csinc	x14, x10, xzr, hi  // hi = pmore
+   94bf4:	bc5d83ba 	ldur	s26, [x29, #-40]
+   94bf8:	b37ced4c 	bfi	x12, x10, #4, #60
+   94bfc:	8b1709af 	add	x15, x13, x23, lsl #2
+   94c00:	d37ef56d 	lsl	x13, x11, #2
+   94c04:	910005cb 	add	x11, x14, #0x1
+   94c08:	8b0f02ce 	add	x14, x22, x15
+   94c0c:	aa1303ef 	mov	x15, x19
+   94c10:	14000004 	b	94c20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x340>
+   94c14:	f10005ef 	subs	x15, x15, #0x1
+   94c18:	8b0d01ce 	add	x14, x14, x13
+   94c1c:	540009c0 	b.eq	94d54 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x474>  // b.none
+   94c20:	f100113f 	cmp	x9, #0x4
+   94c24:	540007e3 	b.cc	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.lo, b.ul, b.last
+   94c28:	3dc001db 	ldr	q27, [x14]
+   94c2c:	f100097f 	cmp	x11, #0x2
+   94c30:	4e3bd6f7 	fadd	v23.4s, v23.4s, v27.4s
+   94c34:	54000760 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94c38:	3dc005db 	ldr	q27, [x14, #16]
+   94c3c:	f1000d7f 	cmp	x11, #0x3
+   94c40:	4e3bd6d6 	fadd	v22.4s, v22.4s, v27.4s
+   94c44:	540006e0 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94c48:	3dc009db 	ldr	q27, [x14, #32]
+   94c4c:	f100117f 	cmp	x11, #0x4
+   94c50:	4e3bd6b5 	fadd	v21.4s, v21.4s, v27.4s
+   94c54:	54000660 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94c58:	3dc00ddb 	ldr	q27, [x14, #48]
+   94c5c:	f100157f 	cmp	x11, #0x5
+   94c60:	4e3bd694 	fadd	v20.4s, v20.4s, v27.4s
+   94c64:	540005e0 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94c68:	3dc011db 	ldr	q27, [x14, #64]
+   94c6c:	f100197f 	cmp	x11, #0x6
+   94c70:	4e3bd673 	fadd	v19.4s, v19.4s, v27.4s
+   94c74:	54000560 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94c78:	3dc015db 	ldr	q27, [x14, #80]
+   94c7c:	f1001d7f 	cmp	x11, #0x7
+   94c80:	4e3bd652 	fadd	v18.4s, v18.4s, v27.4s
+   94c84:	540004e0 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94c88:	3dc019db 	ldr	q27, [x14, #96]
+   94c8c:	f100217f 	cmp	x11, #0x8
+   94c90:	4e3bd631 	fadd	v17.4s, v17.4s, v27.4s
+   94c94:	54000460 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94c98:	3dc01ddb 	ldr	q27, [x14, #112]
+   94c9c:	f100257f 	cmp	x11, #0x9
+   94ca0:	4e3bd610 	fadd	v16.4s, v16.4s, v27.4s
+   94ca4:	540003e0 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94ca8:	3dc021db 	ldr	q27, [x14, #128]
+   94cac:	f100297f 	cmp	x11, #0xa
+   94cb0:	4e3bd4e7 	fadd	v7.4s, v7.4s, v27.4s
+   94cb4:	54000360 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94cb8:	3dc025db 	ldr	q27, [x14, #144]
+   94cbc:	f1002d7f 	cmp	x11, #0xb
+   94cc0:	4e3bd4c6 	fadd	v6.4s, v6.4s, v27.4s
+   94cc4:	540002e0 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94cc8:	3dc029db 	ldr	q27, [x14, #160]
+   94ccc:	f100317f 	cmp	x11, #0xc
+   94cd0:	4e3bd4a5 	fadd	v5.4s, v5.4s, v27.4s
+   94cd4:	54000260 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94cd8:	3dc02ddb 	ldr	q27, [x14, #176]
+   94cdc:	f100357f 	cmp	x11, #0xd
+   94ce0:	4e3bd484 	fadd	v4.4s, v4.4s, v27.4s
+   94ce4:	540001e0 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94ce8:	3dc031db 	ldr	q27, [x14, #192]
+   94cec:	f100397f 	cmp	x11, #0xe
+   94cf0:	4e3bd463 	fadd	v3.4s, v3.4s, v27.4s
+   94cf4:	54000160 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94cf8:	3dc035db 	ldr	q27, [x14, #208]
+   94cfc:	f1003d7f 	cmp	x11, #0xf
+   94d00:	4e3bd442 	fadd	v2.4s, v2.4s, v27.4s
+   94d04:	540000e0 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94d08:	3dc039db 	ldr	q27, [x14, #224]
+   94d0c:	f100417f 	cmp	x11, #0x10
+   94d10:	4e3bd421 	fadd	v1.4s, v1.4s, v27.4s
+   94d14:	54000060 	b.eq	94d20 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x440>  // b.none
+   94d18:	3dc03ddb 	ldr	q27, [x14, #240]
+   94d1c:	4e3bd400 	fadd	v0.4s, v0.4s, v27.4s
+   94d20:	b4fff7a8 	cbz	x8, 94c14 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x334>
+   94d24:	8b0c01d0 	add	x16, x14, x12
+   94d28:	f100051f 	cmp	x8, #0x1
+   94d2c:	bc5f821b 	ldur	s27, [x16, #-8]
+   94d30:	1e392b79 	fadd	s25, s27, s25
+   94d34:	54fff700 	b.eq	94c14 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x334>  // b.none
+   94d38:	bc5fc21b 	ldur	s27, [x16, #-4]
+   94d3c:	f100091f 	cmp	x8, #0x2
+   94d40:	1e382b78 	fadd	s24, s27, s24
+   94d44:	54fff680 	b.eq	94c14 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x334>  // b.none
+   94d48:	bc6c69db 	ldr	s27, [x14, x12]
+   94d4c:	1e3a2b7a 	fadd	s26, s27, s26
+   94d50:	17ffffb1 	b	94c14 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x334>
+   94d54:	2d3a63b9 	stp	s25, s24, [x29, #-48]
+   94d58:	bc1d83ba 	stur	s26, [x29, #-40]
+   94d5c:	b4000ad9 	cbz	x25, 94eb4 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x5d4>
+   94d60:	f100113f 	cmp	x9, #0x4
+   94d64:	54001083 	b.cc	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.lo, b.ul, b.last
+   94d68:	8b170a89 	add	x9, x20, x23, lsl #2
+   94d6c:	f100055f 	cmp	x10, #0x1
+   94d70:	9a9f854a 	csinc	x10, x10, xzr, hi  // hi = pmore
+   94d74:	3dc00138 	ldr	q24, [x9]
+   94d78:	9100054a 	add	x10, x10, #0x1
+   94d7c:	f100095f 	cmp	x10, #0x2
+   94d80:	4e38d6f7 	fadd	v23.4s, v23.4s, v24.4s
+   94d84:	3d800137 	str	q23, [x9]
+   94d88:	54000f60 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94d8c:	3dc00537 	ldr	q23, [x9, #16]
+   94d90:	f1000d5f 	cmp	x10, #0x3
+   94d94:	4e37d6d6 	fadd	v22.4s, v22.4s, v23.4s
+   94d98:	3d800536 	str	q22, [x9, #16]
+   94d9c:	54000ec0 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94da0:	3dc00936 	ldr	q22, [x9, #32]
+   94da4:	f100115f 	cmp	x10, #0x4
+   94da8:	4e36d6b5 	fadd	v21.4s, v21.4s, v22.4s
+   94dac:	3d800935 	str	q21, [x9, #32]
+   94db0:	54000e20 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94db4:	3dc00d35 	ldr	q21, [x9, #48]
+   94db8:	f100155f 	cmp	x10, #0x5
+   94dbc:	4e35d694 	fadd	v20.4s, v20.4s, v21.4s
+   94dc0:	3d800d34 	str	q20, [x9, #48]
+   94dc4:	54000d80 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94dc8:	3dc01134 	ldr	q20, [x9, #64]
+   94dcc:	f100195f 	cmp	x10, #0x6
+   94dd0:	4e34d673 	fadd	v19.4s, v19.4s, v20.4s
+   94dd4:	3d801133 	str	q19, [x9, #64]
+   94dd8:	54000ce0 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94ddc:	3dc01533 	ldr	q19, [x9, #80]
+   94de0:	f1001d5f 	cmp	x10, #0x7
+   94de4:	4e33d652 	fadd	v18.4s, v18.4s, v19.4s
+   94de8:	3d801532 	str	q18, [x9, #80]
+   94dec:	54000c40 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94df0:	3dc01932 	ldr	q18, [x9, #96]
+   94df4:	f100215f 	cmp	x10, #0x8
+   94df8:	4e32d631 	fadd	v17.4s, v17.4s, v18.4s
+   94dfc:	3d801931 	str	q17, [x9, #96]
+   94e00:	54000ba0 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94e04:	3dc01d31 	ldr	q17, [x9, #112]
+   94e08:	f100255f 	cmp	x10, #0x9
+   94e0c:	4e31d610 	fadd	v16.4s, v16.4s, v17.4s
+   94e10:	3d801d30 	str	q16, [x9, #112]
+   94e14:	54000b00 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94e18:	3dc02130 	ldr	q16, [x9, #128]
+   94e1c:	f100295f 	cmp	x10, #0xa
+   94e20:	4e30d4e7 	fadd	v7.4s, v7.4s, v16.4s
+   94e24:	3d802127 	str	q7, [x9, #128]
+   94e28:	54000a60 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94e2c:	3dc02527 	ldr	q7, [x9, #144]
+   94e30:	f1002d5f 	cmp	x10, #0xb
+   94e34:	4e27d4c6 	fadd	v6.4s, v6.4s, v7.4s
+   94e38:	3d802526 	str	q6, [x9, #144]
+   94e3c:	540009c0 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94e40:	3dc02926 	ldr	q6, [x9, #160]
+   94e44:	f100315f 	cmp	x10, #0xc
+   94e48:	4e26d4a5 	fadd	v5.4s, v5.4s, v6.4s
+   94e4c:	3d802925 	str	q5, [x9, #160]
+   94e50:	54000920 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94e54:	3dc02d25 	ldr	q5, [x9, #176]
+   94e58:	f100355f 	cmp	x10, #0xd
+   94e5c:	4e25d484 	fadd	v4.4s, v4.4s, v5.4s
+   94e60:	3d802d24 	str	q4, [x9, #176]
+   94e64:	54000880 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94e68:	3dc03124 	ldr	q4, [x9, #192]
+   94e6c:	f100395f 	cmp	x10, #0xe
+   94e70:	4e24d463 	fadd	v3.4s, v3.4s, v4.4s
+   94e74:	3d803123 	str	q3, [x9, #192]
+   94e78:	540007e0 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94e7c:	3dc03523 	ldr	q3, [x9, #208]
+   94e80:	f1003d5f 	cmp	x10, #0xf
+   94e84:	4e23d442 	fadd	v2.4s, v2.4s, v3.4s
+   94e88:	3d803522 	str	q2, [x9, #208]
+   94e8c:	54000740 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94e90:	3dc03922 	ldr	q2, [x9, #224]
+   94e94:	f100415f 	cmp	x10, #0x10
+   94e98:	4e22d421 	fadd	v1.4s, v1.4s, v2.4s
+   94e9c:	3d803921 	str	q1, [x9, #224]
+   94ea0:	540006a0 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94ea4:	3dc03d21 	ldr	q1, [x9, #240]
+   94ea8:	4e21d400 	fadd	v0.4s, v0.4s, v1.4s
+   94eac:	3d803d20 	str	q0, [x9, #240]
+   94eb0:	14000031 	b	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>
+   94eb4:	f100113f 	cmp	x9, #0x4
+   94eb8:	540005e3 	b.cc	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.lo, b.ul, b.last
+   94ebc:	8b170a89 	add	x9, x20, x23, lsl #2
+   94ec0:	f100097f 	cmp	x11, #0x2
+   94ec4:	3d800137 	str	q23, [x9]
+   94ec8:	54000560 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94ecc:	f1000d7f 	cmp	x11, #0x3
+   94ed0:	3d800536 	str	q22, [x9, #16]
+   94ed4:	54000500 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94ed8:	f100117f 	cmp	x11, #0x4
+   94edc:	3d800935 	str	q21, [x9, #32]
+   94ee0:	540004a0 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94ee4:	f100157f 	cmp	x11, #0x5
+   94ee8:	3d800d34 	str	q20, [x9, #48]
+   94eec:	54000440 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94ef0:	f100197f 	cmp	x11, #0x6
+   94ef4:	3d801133 	str	q19, [x9, #64]
+   94ef8:	540003e0 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94efc:	f1001d7f 	cmp	x11, #0x7
+   94f00:	3d801532 	str	q18, [x9, #80]
+   94f04:	54000380 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94f08:	f100217f 	cmp	x11, #0x8
+   94f0c:	3d801931 	str	q17, [x9, #96]
+   94f10:	54000320 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94f14:	f100257f 	cmp	x11, #0x9
+   94f18:	3d801d30 	str	q16, [x9, #112]
+   94f1c:	540002c0 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94f20:	f100297f 	cmp	x11, #0xa
+   94f24:	3d802127 	str	q7, [x9, #128]
+   94f28:	54000260 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94f2c:	f1002d7f 	cmp	x11, #0xb
+   94f30:	3d802526 	str	q6, [x9, #144]
+   94f34:	54000200 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94f38:	f100317f 	cmp	x11, #0xc
+   94f3c:	3d802925 	str	q5, [x9, #160]
+   94f40:	540001a0 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94f44:	f100357f 	cmp	x11, #0xd
+   94f48:	3d802d24 	str	q4, [x9, #176]
+   94f4c:	54000140 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94f50:	f100397f 	cmp	x11, #0xe
+   94f54:	3d803123 	str	q3, [x9, #192]
+   94f58:	540000e0 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94f5c:	f1003d7f 	cmp	x11, #0xf
+   94f60:	3d803522 	str	q2, [x9, #208]
+   94f64:	54000080 	b.eq	94f74 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x694>  // b.none
+   94f68:	f100417f 	cmp	x11, #0x10
+   94f6c:	3d803921 	str	q1, [x9, #224]
+   94f70:	54fff9e1 	b.ne	94eac <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x5cc>  // b.any
+   94f74:	b4ffdfe8 	cbz	x8, 94b70 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x290>
+   94f78:	8b170a89 	add	x9, x20, x23, lsl #2
+   94f7c:	927e138a 	and	x10, x28, #0x7c
+   94f80:	8b0a0920 	add	x0, x9, x10, lsl #2
+   94f84:	b4ffdf19 	cbz	x25, 94b64 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x284>
+   94f88:	bc5d03a0 	ldur	s0, [x29, #-48]
+   94f8c:	bd400001 	ldr	s1, [x0]
+   94f90:	f100051f 	cmp	x8, #0x1
+   94f94:	1e212800 	fadd	s0, s0, s1
+   94f98:	bd000000 	str	s0, [x0]
+   94f9c:	54ffdea0 	b.eq	94b70 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x290>  // b.none
+   94fa0:	bc5d43a0 	ldur	s0, [x29, #-44]
+   94fa4:	bd400401 	ldr	s1, [x0, #4]
+   94fa8:	f100091f 	cmp	x8, #0x2
+   94fac:	1e212800 	fadd	s0, s0, s1
+   94fb0:	bd000400 	str	s0, [x0, #4]
+   94fb4:	54ffdde0 	b.eq	94b70 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x290>  // b.none
+   94fb8:	bc5d83a0 	ldur	s0, [x29, #-40]
+   94fbc:	bd400801 	ldr	s1, [x0, #8]
+   94fc0:	1e212800 	fadd	s0, s0, s1
+   94fc4:	bd000800 	str	s0, [x0, #8]
+   94fc8:	17fffeea 	b	94b70 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x290>
+   94fcc:	f10042bf 	cmp	x21, #0x10
+   94fd0:	54000062 	b.cs	94fdc <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x6fc>  // b.hs, b.nlast
+   94fd4:	aa1f03e9 	mov	x9, xzr
+   94fd8:	14000036 	b	950b0 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x7d0>
+   94fdc:	b4000598 	cbz	x24, 9508c <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x7ac>
+   94fe0:	aa1f03ea 	mov	x10, xzr
+   94fe4:	5280020c 	mov	w12, #0x10                  	// #16
+   94fe8:	aa1503e8 	mov	x8, x21
+   94fec:	aa1803eb 	mov	x11, x24
+   94ff0:	1400000c 	b	95020 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x740>
+   94ff4:	6f00e400 	movi	v0.2d, #0x0
+   94ff8:	6f00e402 	movi	v2.2d, #0x0
+   94ffc:	6f00e403 	movi	v3.2d, #0x0
+   95000:	6f00e401 	movi	v1.2d, #0x0
+   95004:	8b0a0a8d 	add	x13, x20, x10, lsl #2
+   95008:	9100412c 	add	x12, x9, #0x10
+   9500c:	aa0903ea 	mov	x10, x9
+   95010:	eb08019f 	cmp	x12, x8
+   95014:	ad000da1 	stp	q1, q3, [x13]
+   95018:	ad0101a2 	stp	q2, q0, [x13, #32]
+   9501c:	540004c8 	b.hi	950b4 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x7d4>  // b.pmore
+   95020:	aa0c03e9 	mov	x9, x12
+   95024:	b4fffe8b 	cbz	x11, 94ff4 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x714>
+   95028:	6f00e401 	movi	v1.2d, #0x0
+   9502c:	6f00e403 	movi	v3.2d, #0x0
+   95030:	8b0a0acc 	add	x12, x22, x10, lsl #2
+   95034:	6f00e402 	movi	v2.2d, #0x0
+   95038:	6f00e400 	movi	v0.2d, #0x0
+   9503c:	5280008d 	mov	w13, #0x4                   	// #4
+   95040:	1400000d 	b	95074 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x794>
+   95044:	ad401584 	ldp	q4, q5, [x12]
+   95048:	d1000dab 	sub	x11, x13, #0x3
+   9504c:	ad411d86 	ldp	q6, q7, [x12, #32]
+   95050:	8b08098c 	add	x12, x12, x8, lsl #2
+   95054:	910005ad 	add	x13, x13, #0x1
+   95058:	eb18017f 	cmp	x11, x24
+   9505c:	aa1803eb 	mov	x11, x24
+   95060:	4e24d421 	fadd	v1.4s, v1.4s, v4.4s
+   95064:	4e25d463 	fadd	v3.4s, v3.4s, v5.4s
+   95068:	4e26d442 	fadd	v2.4s, v2.4s, v6.4s
+   9506c:	4e27d400 	fadd	v0.4s, v0.4s, v7.4s
+   95070:	54fffca2 	b.cs	95004 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x724>  // b.hs, b.nlast
+   95074:	eb0b01bf 	cmp	x13, x11
+   95078:	54fffe62 	b.cs	95044 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x764>  // b.hs, b.nlast
+   9507c:	8b081188 	add	x8, x12, x8, lsl #4
+   95080:	f9800100 	prfm	pldl1keep, [x8]
+   95084:	a941a3f8 	ldp	x24, x8, [sp, #24]
+   95088:	17ffffef 	b	95044 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x764>
+   9508c:	6f00e400 	movi	v0.2d, #0x0
+   95090:	aa1f03e9 	mov	x9, xzr
+   95094:	aa1403e8 	mov	x8, x20
+   95098:	9100812a 	add	x10, x9, #0x20
+   9509c:	91004129 	add	x9, x9, #0x10
+   950a0:	ad010100 	stp	q0, q0, [x8, #32]
+   950a4:	eb15015f 	cmp	x10, x21
+   950a8:	ac820100 	stp	q0, q0, [x8], #64
+   950ac:	54ffff69 	b.ls	95098 <_ZN7raptors4simd24reduce_axis0_columns_f3217h818fe0908888c1ffE+0x7b8>  // b.plast

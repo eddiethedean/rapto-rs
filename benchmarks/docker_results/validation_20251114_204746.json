@@ -1,0 +1,141 @@
+{
+  "metadata": {
+    "numpy_version": "2.3.4",
+    "numpy_config": {
+      "show": "Build Dependencies:\n  blas:\n    detection method: pkgconfig\n    found: true\n    include directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/include\n    lib directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/lib\n    name: scipy-openblas\n    openblas configuration: OpenBLAS 0.3.30  USE64BITINT DYNAMIC_ARCH NO_AFFINITY\n      neoversev2 MAX_THREADS=64\n    pc file directory: /project/.openblas\n    version: 0.3.30\n  lapack:\n    detection method: pkgconfig\n    found: true\n    include directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/include\n    lib directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/lib\n    name: scipy-openblas\n    openblas configuration: OpenBLAS 0.3.30  USE64BITINT DYNAMIC_ARCH NO_AFFINITY\n      neoversev2 MAX_THREADS=64\n    pc file directory: /project/.openblas\n    version: 0.3.30\nCompilers:\n  c:\n    commands: cc\n    linker: ld.bfd\n    name: gcc\n    version: 14.2.1\n  c++:\n    commands: c++\n    linker: ld.bfd\n    name: gcc\n    version: 14.2.1\n  cython:\n    commands: cython\n    linker: cython\n    name: cython\n    version: 3.1.4\nMachine Information:\n  build:\n    cpu: aarch64\n    endian: little\n    family: aarch64\n    system: linux\n  host:\n    cpu: aarch64\n    endian: little\n    family: aarch64\n    system: linux\nPython Information:\n  path: /tmp/build-env-owyist_s/bin/python\n  version: '3.11'\nSIMD Extensions:\n  baseline:\n  - NEON\n  - NEON_FP16\n  - NEON_VFPV4\n  - ASIMD\n  found:\n  - ASIMDHP\n  - ASIMDFHM\n  not found:\n  - SVE",
+      "blas_opt_info": {},
+      "lapack_opt_info": {}
+    },
+    "simd_mode": "auto",
+    "layout": "contiguous",
+    "env": {
+      "RAPTORS_THREADS": "10",
+      "RAPTORS_SIMD": null
+    },
+    "timestamp": 1763171266.8433943,
+    "raptors_threading": "ThreadingDiagnostics(parallel_min_elements=32768, baseline_cutovers={'float64': 32768, 'float32': 49152, 'int32': 65536}, dimension_thresholds={'float64': [64, 64], 'float32': [128, 64], 'int32': [128, 128]}, thread_pool={'active_threads': 10}, adaptive_thresholds={'float64': AdaptiveThreshold(dtype='float64', baseline_cutover=32768, recommended_cutover=None, median_elements_per_ms=0.0, seq_median_elements_per_ms=4501335.599936037, p95_elements_per_ms=None, seq_p95_elements_per_ms=4976916.8679522965, variance_ratio=None, seq_variance_ratio=1.1056533683076235, sample_count=0, seq_sample_count=9, samples=[], seq_samples=[4743571.648299947, 5132480.347720531, 4353760.477487997, 4660985.136824559, 1049089.5293246042, 4537242.391691196, 2531454.6963410038, 4501335.599936037, 1973945.24652055], target_latency_ms=0.28), 'float32': AdaptiveThreshold(dtype='float32', baseline_cutover=49152, recommended_cutover=None, median_elements_per_ms=0.0, seq_median_elements_per_ms=2896534.7690191306, p95_elements_per_ms=None, seq_p95_elements_per_ms=10158645.63485316, variance_ratio=None, seq_variance_ratio=3.507171998592386, sample_count=0, seq_sample_count=9, samples=[], seq_samples=[2896534.7690191306, 2421129.3744137385, 2480674.145607502, 2363876.4538561814, 1196094.523972343, 3215770.7016526973, 9749456.659437623, 9735313.368954169, 10431438.285130184], target_latency_ms=0.32), 'int32': AdaptiveThreshold(dtype='int32', baseline_cutover=65536, recommended_cutover=None, median_elements_per_ms=0.0, seq_median_elements_per_ms=0.0, p95_elements_per_ms=None, seq_p95_elements_per_ms=None, variance_ratio=None, seq_variance_ratio=None, sample_count=0, seq_sample_count=0, samples=[], seq_samples=[], target_latency_ms=0.4)}, last_event=LastEvent(dtype='float32', elements=4194304, duration_ms=0.402083, tiles_processed=2048, partial_buffer=2048, parallel=False, operation='axis0', chunk_rows=None, chunk_len=None, chunk_count=None, pool_threads=None, strategy=''), backend_usage=[])",
+    "raptors_simd_enabled": true
+  },
+  "cases": [
+    {
+      "shape": [
+        512,
+        512
+      ],
+      "dtype": "float64",
+      "elements": 262144,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 0.00010658366663089207,
+          "numpy_std_s": 9.722986083168178e-06,
+          "raptors_mean_s": 7.369466663931235e-05,
+          "raptors_std_s": 1.5094439863226846e-06,
+          "speedup": 1.4462873840321455
+        }
+      ]
+    },
+    {
+      "shape": [
+        512,
+        512
+      ],
+      "dtype": "float32",
+      "elements": 262144,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 8.780566664275587e-05,
+          "numpy_std_s": 7.307944059101696e-06,
+          "raptors_mean_s": 5.555533330910597e-05,
+          "raptors_std_s": 1.1791142123222505e-06,
+          "speedup": 1.5805083222921428
+        }
+      ]
+    },
+    {
+      "shape": [
+        1024,
+        1024
+      ],
+      "dtype": "float64",
+      "elements": 1048576,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 0.00014537466662053097,
+          "numpy_std_s": 5.204165031037239e-07,
+          "raptors_mean_s": 0.0018990693333383508,
+          "raptors_std_s": 0.0008753830894024326,
+          "speedup": 0.0765504787363285
+        }
+      ]
+    },
+    {
+      "shape": [
+        1024,
+        1024
+      ],
+      "dtype": "float32",
+      "elements": 1048576,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 8.684766665586115e-05,
+          "numpy_std_s": 2.0454058775983076e-06,
+          "raptors_mean_s": 0.0004184859999819916,
+          "raptors_std_s": 0.00020809225831113556,
+          "speedup": 0.2075282486381824
+        }
+      ]
+    },
+    {
+      "shape": [
+        2048,
+        2048
+      ],
+      "dtype": "float64",
+      "elements": 4194304,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 0.0016874446666482374,
+          "numpy_std_s": 0.00037631798510388397,
+          "raptors_mean_s": 0.001589958333359694,
+          "raptors_std_s": 0.0006084654678231663,
+          "speedup": 1.0613137660548297
+        }
+      ]
+    },
+    {
+      "shape": [
+        2048,
+        2048
+      ],
+      "dtype": "float32",
+      "elements": 4194304,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 0.00028854166665344866,
+          "numpy_std_s": 3.145764810655621e-07,
+          "raptors_mean_s": 0.0007269443333749829,
+          "raptors_std_s": 0.0005088745784353851,
+          "speedup": 0.39692401935900223
+        }
+      ]
+    }
+  ]
+}

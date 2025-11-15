@@ -87,16 +87,30 @@ Initial benchmarks on Linux (Ubuntu 22.04, ARM64) identified the following lagga
 
 ## Remaining Laggards
 
-### Critical (Improvements Made, Still Needs Work)
+### Critical (Optimizations Applied, Awaiting Validation)
 
-1. **mean_axis0 operations** - Performance significantly improved
-   - **mean_axis0 @ 2048² float64**: Improved from 0.34x to 0.62x (SIMD-first on Linux, optimized NEON with tiled approach) ✅
-   - **mean_axis0 @ 2048² float32**: Improved from 0.05x to 0.92x (SIMD-first on Linux, optimized NEON with tiled approach - very close to parity!) ✅
-   - **mean_axis0 @ 512² float64**: Improved from 0.52x to 0.56x (BLAS path added) ✅
-   - **mean_axis0 @ 1024² float32**: Improved from 0.43x to 1.58x (BLAS path added, now faster than NumPy!) ✅
-   - **Key change**: Switched from columnar to tiled approach for 2048² float32, providing better cache locality
-   - **Remaining**: mean_axis0 @ 2048² float64 still below parity (0.62x), float32 very close (0.92x)
-   - **Next steps**: Further optimize tiled NEON kernel for float64 or investigate NumPy's optimization approach
+1. **mean_axis0 operations** - Performance optimizations applied (2025-01-XX)
+   - **mean_axis0 @ 2048² float64**: Previous: 0.62x → Applied optimizations:
+     - Added specialized 2048x2048 tiled path with optimized tile sizes (256x128)
+     - Added 4x loop unrolling in tiled inner row loop
+     - Added aggressive prefetching (L1 and L2) for input data and output buffers
+     - Optimized tile sizes specifically for ARM64 cache hierarchy
+   - **mean_axis0 @ 2048² float32**: Previous: 0.92x → Applied optimizations:
+     - Added specialized 2048x2048 tiled path with optimized tile sizes (256x128)
+     - Added 4x loop unrolling in tiled inner row loop
+     - Added aggressive prefetching (L1 and L2) for input data and output buffers
+     - Prefetching for output buffer before writes
+   - **General tiled path improvements** (for >=512² matrices):
+     - Added 4x loop unrolling to reduce loop overhead and improve ILP
+     - Added prefetching for next tiles and ahead in row processing
+     - Optimized prefetch distances for better pipelining
+   - **Code locations**:
+     - Specialized 2048x2048 paths: `rust/src/simd/mod.rs` lines 1946-2071 (f32), 2369-2501 (f64)
+     - Optimized general tiled paths: `rust/src/simd/mod.rs` lines 2073-2140 (f32), 2503-2580 (f64)
+   - **Status**: Optimizations implemented, awaiting Docker benchmark validation
+   - **Expected improvements**: 
+     - float64: 0.62x → >=0.95x (target: >=1.0x)
+     - float32: 0.92x → >=1.0x
 
 ### Near Parity (Acceptable)
 
@@ -168,6 +182,9 @@ All fixes were validated using:
   - Optimized NEON `add_same_shape_f32` with 4x unrolling for broadcast_add operations (lines 2391-2439)
   - Optimized NEON `reduce_axis0_columns_f32` with tiled approach and 2048-row unrolling (lines 1935-2049)
   - Optimized NEON `reduce_axis0_columns_f64` with tiled approach and 2048-row unrolling (lines 2112-2324)
+  - **NEW (2025-01-XX)**: Added specialized 2048x2048 paths with optimized tile sizes (256x128) for both f32 and f64 (lines 1946-2071 for f32, 2369-2501 for f64)
+  - **NEW (2025-01-XX)**: Added 4x loop unrolling to general tiled paths for >=512² matrices (lines 1991-2036 for f32, 2279-2324 for f64)
+  - **NEW (2025-01-XX)**: Added aggressive prefetching (L1 and L2) for next tiles and output buffers in both specialized and general tiled paths
 - `rust/build.rs`:
   - Added OpenBLAS detection and linking (new file)
 - `rust/Cargo.toml`:

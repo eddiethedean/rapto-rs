@@ -10,6 +10,7 @@ services:
       - raptors-target:/workspace/src/rust/target
       - ./benchmarks/docker_results:/workspace/src/benchmarks/docker_results
       - ./docs/profiles:/workspace/src/docs/profiles
+      - ./benchmarks/profiles:/workspace/profiles
     working_dir: /workspace/src
     environment:
       - PYTHONPATH=/workspace/.venv/lib/python3.11/site-packages:/workspace/src/python

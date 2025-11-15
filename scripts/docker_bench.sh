@@ -28,7 +28,15 @@ COMMAND="${1:-help}"
 case "$COMMAND" in
   build)
     echo "Building Docker image..."
-    docker-compose -f docker-compose.bench.yml build
+    # Try docker compose (v2) first, fall back to docker-compose (v1)
+    if command -v docker &> /dev/null && docker compose version &> /dev/null 2>/dev/null; then
+      docker compose -f docker-compose.bench.yml build
+    elif command -v docker-compose &> /dev/null; then
+      docker-compose -f docker-compose.bench.yml build
+    else
+      echo "Error: Neither 'docker compose' nor 'docker-compose' found. Please ensure Docker Desktop is running."
+      exit 1
+    fi
     ;;
   run)
     shift || true
@@ -37,17 +45,41 @@ case "$COMMAND" in
       usage
       exit 1
     fi
-    docker-compose -f docker-compose.bench.yml run --rm bench "$@"
+    if command -v docker &> /dev/null && docker compose version &> /dev/null 2>/dev/null; then
+      docker compose -f docker-compose.bench.yml run --rm bench "$@"
+    elif command -v docker-compose &> /dev/null; then
+      docker-compose -f docker-compose.bench.yml run --rm bench "$@"
+    else
+      echo "Error: Neither 'docker compose' nor 'docker-compose' found. Please ensure Docker Desktop is running."
+      exit 1
+    fi
     ;;
   shell)
-    docker-compose -f docker-compose.bench.yml run --rm bench /bin/bash
+    if command -v docker &> /dev/null && docker compose version &> /dev/null 2>/dev/null; then
+      docker compose -f docker-compose.bench.yml run --rm bench /bin/bash
+    elif command -v docker-compose &> /dev/null; then
+      docker-compose -f docker-compose.bench.yml run --rm bench /bin/bash
+    else
+      echo "Error: Neither 'docker compose' nor 'docker-compose' found. Please ensure Docker Desktop is running."
+      exit 1
+    fi
     ;;
   bench)
     echo "Running benchmarks in Docker..."
-    docker-compose -f docker-compose.bench.yml run --rm bench \
-      /workspace/.venv/bin/python scripts/compare_numpy_raptors.py \
-      --suite 2d \
-      --output-dir benchmarks/docker_results/$(date +%Y%m%d-%H%M%S)
+    if command -v docker &> /dev/null && docker compose version &> /dev/null 2>/dev/null; then
+      docker compose -f docker-compose.bench.yml run --rm bench \
+        /workspace/.venv/bin/python scripts/compare_numpy_raptors.py \
+        --suite 2d \
+        --output-dir benchmarks/docker_results/$(date +%Y%m%d-%H%M%S)
+    elif command -v docker-compose &> /dev/null; then
+      docker-compose -f docker-compose.bench.yml run --rm bench \
+        /workspace/.venv/bin/python scripts/compare_numpy_raptors.py \
+        --suite 2d \
+        --output-dir benchmarks/docker_results/$(date +%Y%m%d-%H%M%S)
+    else
+      echo "Error: Neither 'docker compose' nor 'docker-compose' found. Please ensure Docker Desktop is running."
+      exit 1
+    fi
     ;;
   profile)
     shift || true
@@ -56,13 +88,29 @@ case "$COMMAND" in
       echo "Usage: docker_bench.sh profile <operation>"
       exit 1
     fi
-    docker-compose -f docker-compose.bench.yml run --rm bench \
-      /workspace/scripts/profile_operation.sh "$@"
+    if command -v docker &> /dev/null && docker compose version &> /dev/null 2>/dev/null; then
+      docker compose -f docker-compose.bench.yml run --rm bench \
+        /workspace/scripts/profile_operation.sh "$@"
+    elif command -v docker-compose &> /dev/null; then
+      docker-compose -f docker-compose.bench.yml run --rm bench \
+        /workspace/scripts/profile_operation.sh "$@"
+    else
+      echo "Error: Neither 'docker compose' nor 'docker-compose' found. Please ensure Docker Desktop is running."
+      exit 1
+    fi
     ;;
   clean)
     echo "Cleaning up Docker resources..."
-    docker-compose -f docker-compose.bench.yml down
-    docker rmi raptors-bench 2>/dev/null || true
+    if command -v docker &> /dev/null && docker compose version &> /dev/null 2>/dev/null; then
+      docker compose -f docker-compose.bench.yml down
+      docker rmi raptors-bench 2>/dev/null || true
+    elif command -v docker-compose &> /dev/null; then
+      docker-compose -f docker-compose.bench.yml down
+      docker rmi raptors-bench 2>/dev/null || true
+    else
+      echo "Error: Neither 'docker compose' nor 'docker-compose' found. Please ensure Docker Desktop is running."
+      exit 1
+    fi
     ;;
   help|--help|-h)
     usage
