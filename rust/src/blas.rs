@@ -379,22 +379,49 @@ impl BlasProvider for OpenBlasBackend {
         if data.len() != rows.saturating_mul(cols) {
             return false;
         }
-        let ones = vec![1.0f32; rows];
-        unsafe {
-            cblas_sgemv(
-                CBLAS_ROW_MAJOR,
-                CBLAS_TRANSPOSE,
-                rows as i32,
-                cols as i32,
-                1.0,
-                data.as_ptr(),
-                rows as i32,
-                ones.as_ptr(),
-                1,
-                0.0,
-                out.as_mut_ptr(),
-                1,
-            );
+        
+        // Use static cached ones vector to avoid allocation overhead
+        // For small sizes, just use a small array on the stack
+        // For larger sizes, we still need to allocate but minimize overhead
+        const MAX_STACK_ONES: usize = 4096; // 16KB for float32
+        if rows <= MAX_STACK_ONES {
+            // Use stack-allocated array for small to medium sizes
+            let mut ones = [1.0f32; MAX_STACK_ONES];
+            unsafe {
+                cblas_sgemv(
+                    CBLAS_ROW_MAJOR,
+                    CBLAS_TRANSPOSE,
+                    rows as i32,
+                    cols as i32,
+                    1.0,
+                    data.as_ptr(),
+                    rows as i32,
+                    ones.as_ptr(),
+                    1,
+                    0.0,
+                    out.as_mut_ptr(),
+                    1,
+                );
+            }
+        } else {
+            // For very large sizes, allocate (uncommon case)
+            let ones = vec![1.0f32; rows];
+            unsafe {
+                cblas_sgemv(
+                    CBLAS_ROW_MAJOR,
+                    CBLAS_TRANSPOSE,
+                    rows as i32,
+                    cols as i32,
+                    1.0,
+                    data.as_ptr(),
+                    rows as i32,
+                    ones.as_ptr(),
+                    1,
+                    0.0,
+                    out.as_mut_ptr(),
+                    1,
+                );
+            }
         }
         true
     }
@@ -409,22 +436,49 @@ impl BlasProvider for OpenBlasBackend {
         {
             return false;
         }
-        let ones = vec![1.0f64; rows];
-        unsafe {
-            cblas_dgemv(
-                CBLAS_ROW_MAJOR,
-                CBLAS_TRANSPOSE,
-                rows as i32,
-                cols as i32,
-                1.0,
-                data.as_ptr(),
-                rows as i32,
-                ones.as_ptr(),
-                1,
-                0.0,
-                out.as_mut_ptr(),
-                1,
-            );
+        
+        // Use static cached ones vector to avoid allocation overhead
+        // For small sizes, just use a small array on the stack
+        // For larger sizes, we still need to allocate but minimize overhead
+        const MAX_STACK_ONES: usize = 2048; // 16KB for float64
+        if rows <= MAX_STACK_ONES {
+            // Use stack-allocated array for small to medium sizes (covers 2048² case)
+            let mut ones = [1.0f64; MAX_STACK_ONES];
+            unsafe {
+                cblas_dgemv(
+                    CBLAS_ROW_MAJOR,
+                    CBLAS_TRANSPOSE,
+                    rows as i32,
+                    cols as i32,
+                    1.0,
+                    data.as_ptr(),
+                    rows as i32,
+                    ones.as_ptr(),
+                    1,
+                    0.0,
+                    out.as_mut_ptr(),
+                    1,
+                );
+            }
+        } else {
+            // For very large sizes, allocate (uncommon case)
+            let ones = vec![1.0f64; rows];
+            unsafe {
+                cblas_dgemv(
+                    CBLAS_ROW_MAJOR,
+                    CBLAS_TRANSPOSE,
+                    rows as i32,
+                    cols as i32,
+                    1.0,
+                    data.as_ptr(),
+                    rows as i32,
+                    ones.as_ptr(),
+                    1,
+                    0.0,
+                    out.as_mut_ptr(),
+                    1,
+                );
+            }
         }
         true
     }

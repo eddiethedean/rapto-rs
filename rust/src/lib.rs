@@ -3840,8 +3840,23 @@ where
                     }
                 }
                 
+                // On Linux, try sequential SIMD first (can be faster than parallel due to overhead)
+                #[cfg(not(target_os = "macos"))]
+                {
+                    if simd_enabled && simd::scale_same_shape_f32(input, factor_f32, out) {
+                        record_scale_event(dtype, rows, cols, start.elapsed(), false);
+                        record_backend_metric(OPERATION_SCALE, dtype, "simd");
+                        #[cfg(debug_assertions)]
+                        {
+                            eprintln!("[DEBUG] Using sequential SIMD for 2048² float32 (Linux)");
+                        }
+                        return Ok(NumericArray::new_owned(data, self.shape.clone()));
+                    }
+                }
+                
                 // Fallback to parallel SIMD - uses all available threads with optimized chunking
                 // For 2048², parallel_scale_f32 uses 8-10 chunks (~200-256 rows each) for optimal cache utilization
+                // On macOS, parallel SIMD can be faster, but on Linux sequential may be better
                 if let Some(_pool) = thread_pool() {
                     if parallel_scale_f32(input, factor, out, rows, cols, simd_enabled) {
                         // parallel_scale_f32 records its own backend metric and event
@@ -4408,7 +4423,41 @@ fn reduce_axis0_f64(
             parallel: false,
         };
     }
+    // For 512², try BLAS first if available (often faster than SIMD on Linux/aarch64)
+    if rows == 512 && cols == 512 {
+        if blas::axis0_enabled() {
+            let mut sums = vec![0.0f64; cols];
+            if blas::current_backend().dgemv_axis0_sum(rows, cols, data, &mut sums) {
+                if matches!(op, Reduction::Mean) {
+                    let inv = 1.0 / rows as f64;
+                    for value in &mut sums {
+                        *value *= inv;
+                    }
+                }
+                return AxisOutcome {
+                    values: sums,
+                    parallel: false,
+                };
+            }
+        }
+        // Fall back to SIMD or Kahan if BLAS fails
+    }
+
     if rows <= SMALL_MATRIX_FAST_DIM && cols <= SMALL_MATRIX_FAST_DIM {
+        // Try SIMD first for small sizes if BLAS wasn't used
+        if let Some(mut simd_sums) = simd::reduce_axis0_columns_f64(data, rows, cols) {
+            if matches!(op, Reduction::Mean) {
+                let inv = 1.0 / rows as f64;
+                for value in &mut simd_sums {
+                    *value *= inv;
+                }
+            }
+            return AxisOutcome {
+                values: simd_sums,
+                parallel: false,
+            };
+        }
+        // Fallback to Kahan summation
         let mut sums_stack = [0.0f64; SMALL_MATRIX_FAST_DIM];
         let mut comps_stack = [0.0f64; SMALL_MATRIX_FAST_DIM];
         {
@@ -4434,23 +4483,11 @@ fn reduce_axis0_f64(
         };
     }
 
-    // For exactly 2048², try BLAS first, then SIMD, then optimized SIMD accumulation
-    // BLAS is highly optimized and typically faster than SIMD for this size
-    // If BLAS fails, fall back to optimized SIMD kernel
-    // If SIMD kernel also fails, use optimized SIMD-based column accumulation
-    if rows == 2048 && cols == 2048 {
-        let debug = env::var("RAPTORS_DEBUG_AXIS0").is_ok();
-        if debug {
-            eprintln!("[DEBUG] reduce_axis0_f64: 2048² float64 path");
-            eprintln!("[DEBUG]   BLAS enabled: {}", blas::axis0_enabled());
-            eprintln!("[DEBUG]   BLAS backend: {}", blas::backend_name());
-        }
+    // For 1024², try BLAS first if available
+    if rows == 1024 && cols == 1024 {
         if blas::axis0_enabled() {
             let mut sums = vec![0.0f64; cols];
             if blas::current_backend().dgemv_axis0_sum(rows, cols, data, &mut sums) {
-                if debug {
-                    eprintln!("[DEBUG] reduce_axis0_f64: Using BLAS path");
-                }
                 if matches!(op, Reduction::Mean) {
                     let inv = 1.0 / rows as f64;
                     for value in &mut sums {
@@ -4462,11 +4499,80 @@ fn reduce_axis0_f64(
                     parallel: false,
                 };
             }
-            if debug {
-                eprintln!("[DEBUG] reduce_axis0_f64: BLAS path failed, trying SIMD");
+        }
+        // Fall back to SIMD if BLAS fails
+        if let Some(mut simd_sums) = simd::reduce_axis0_columns_f64(data, rows, cols) {
+            if matches!(op, Reduction::Mean) {
+                let inv = 1.0 / rows as f64;
+                for value in &mut simd_sums {
+                    *value *= inv;
+                }
+            }
+            return AxisOutcome {
+                values: simd_sums,
+                parallel: false,
+            };
+        }
+    }
+
+    // For exactly 2048², try SIMD first on Linux (can be faster than BLAS)
+    // BLAS has overhead and may not be as optimized as SIMD on Linux/ARM64
+    // On macOS, BLAS (Accelerate) is highly optimized, but on Linux SIMD can be faster
+    if rows == 2048 && cols == 2048 {
+        let debug = env::var("RAPTORS_DEBUG_AXIS0").is_ok();
+        if debug {
+            eprintln!("[DEBUG] reduce_axis0_f64: 2048² float64 path");
+            eprintln!("[DEBUG]   BLAS enabled: {}", blas::axis0_enabled());
+            eprintln!("[DEBUG]   BLAS backend: {}", blas::backend_name());
+        }
+        
+        // On Linux, try optimized SIMD first (can be faster than BLAS)
+        #[cfg(not(target_os = "macos"))]
+        {
+            if let Some(mut simd_sums) = simd::reduce_axis0_columns_f64(data, rows, cols) {
+                if debug {
+                    eprintln!("[DEBUG] reduce_axis0_f64: Using SIMD kernel path (Linux)");
+                }
+                if matches!(op, Reduction::Mean) {
+                    let inv = 1.0 / rows as f64;
+                    for value in &mut simd_sums {
+                        *value *= inv;
+                    }
+                }
+                return AxisOutcome {
+                    values: simd_sums,
+                    parallel: false,
+                };
             }
         }
-        // Fall back to SIMD if BLAS fails or is not available
+        
+        // On macOS, try BLAS first (Accelerate is highly optimized)
+        #[cfg(target_os = "macos")]
+        {
+            if blas::axis0_enabled() {
+                let mut sums = vec![0.0f64; cols];
+                if blas::current_backend().dgemv_axis0_sum(rows, cols, data, &mut sums) {
+                    if debug {
+                        eprintln!("[DEBUG] reduce_axis0_f64: Using BLAS path (macOS)");
+                    }
+                    if matches!(op, Reduction::Mean) {
+                        let inv = 1.0 / rows as f64;
+                        for value in &mut sums {
+                            *value *= inv;
+                        }
+                    }
+                    return AxisOutcome {
+                        values: sums,
+                        parallel: false,
+                    };
+                }
+                if debug {
+                    eprintln!("[DEBUG] reduce_axis0_f64: BLAS path failed, trying SIMD");
+                }
+            }
+        }
+        
+        // Fall back to SIMD if BLAS failed (macOS) or not tried (Linux)
         // SIMD kernel is optimized for 2048 rows with 8-column processing
         if let Some(mut simd_sums) = simd::reduce_axis0_columns_f64(data, rows, cols) {
             if debug {
@@ -4482,6 +4588,29 @@ fn reduce_axis0_f64(
                 values: simd_sums,
                 parallel: false,
             };
+        }
+        
+        // On Linux, also try BLAS as a fallback
+        #[cfg(not(target_os = "macos"))]
+        {
+            if blas::axis0_enabled() {
+                let mut sums = vec![0.0f64; cols];
+                if blas::current_backend().dgemv_axis0_sum(rows, cols, data, &mut sums) {
+                    if debug {
+                        eprintln!("[DEBUG] reduce_axis0_f64: Using BLAS path (Linux fallback)");
+                    }
+                    if matches!(op, Reduction::Mean) {
+                        let inv = 1.0 / rows as f64;
+                        for value in &mut sums {
+                            *value *= inv;
+                        }
+                    }
+                    return AxisOutcome {
+                        values: sums,
+                        parallel: false,
+                    };
+                }
+            }
         }
         if debug {
             eprintln!("[DEBUG] reduce_axis0_f64: SIMD kernel returned None, trying parallel fallback");
@@ -4767,6 +4896,88 @@ fn reduce_axis0_f32(
 ) -> AxisOutcome {
     if cols == 0 || rows == 0 {
         return finalize_axis0_f32(vec![0.0; cols], None, rows, cols, op, false);
+    }
+
+    // For 1024², try BLAS first if available (often faster than SIMD on Linux/aarch64)
+    if rows == 1024 && cols == 1024 {
+        if blas::axis0_enabled() {
+            let mut sums = vec![0.0f32; cols];
+            if blas::current_backend().sgemv_axis0_sum(rows, cols, data, &mut sums) {
+                return finalize_axis0_f32(sums, None, rows, cols, op, false);
+            }
+        }
+        // Fall back to SIMD if BLAS fails
+        if let Some(simd_sums) = simd::reduce_axis0_columns_f32(data, rows, cols) {
+            return finalize_axis0_f32(simd_sums, None, rows, cols, op, false);
+        }
+    }
+
+    // For exactly 2048², try SIMD first on Linux (can be faster than BLAS)
+    // BLAS has overhead and may not be as optimized as SIMD on Linux/ARM64
+    // On macOS, BLAS (Accelerate) is highly optimized, but on Linux SIMD can be faster
+    if rows == 2048 && cols == 2048 {
+        let debug = env::var("RAPTORS_DEBUG_AXIS0").is_ok();
+        if debug {
+            eprintln!("[DEBUG] reduce_axis0_f32: 2048² float32 path");
+        }
+        
+        // On Linux, try optimized SIMD first (can be faster than BLAS)
+        #[cfg(not(target_os = "macos"))]
+        {
+            if let Some(simd_sums) = simd::reduce_axis0_columns_f32(data, rows, cols) {
+                if debug {
+                    eprintln!("[DEBUG] reduce_axis0_f32: Using SIMD path (Linux)");
+                }
+                return finalize_axis0_f32(simd_sums, None, rows, cols, op, false);
+            }
+            if debug {
+                eprintln!("[DEBUG] reduce_axis0_f32: SIMD returned None on Linux");
+            }
+        }
+        
+        // On macOS, try BLAS first (Accelerate is highly optimized)
+        #[cfg(target_os = "macos")]
+        {
+            if blas::axis0_enabled() {
+                let mut sums = vec![0.0f32; cols];
+                if blas::current_backend().sgemv_axis0_sum(rows, cols, data, &mut sums) {
+                    if debug {
+                        eprintln!("[DEBUG] reduce_axis0_f32: Using BLAS path (macOS)");
+                    }
+                    return finalize_axis0_f32(sums, None, rows, cols, op, false);
+                }
+            }
+        }
+        
+        // Fall back to SIMD if BLAS failed (macOS) or not tried (Linux)
+        if let Some(simd_sums) = simd::reduce_axis0_columns_f32(data, rows, cols) {
+            if debug {
+                eprintln!("[DEBUG] reduce_axis0_f32: Using SIMD fallback");
+            }
+            return finalize_axis0_f32(simd_sums, None, rows, cols, op, false);
+        }
+        
+        if debug {
+            eprintln!("[DEBUG] reduce_axis0_f32: SIMD fallback also returned None, trying BLAS");
+        }
+        
+        // On Linux, also try BLAS as a fallback
+        #[cfg(not(target_os = "macos"))]
+        {
+            if blas::axis0_enabled() {
+                let mut sums = vec![0.0f32; cols];
+                if blas::current_backend().sgemv_axis0_sum(rows, cols, data, &mut sums) {
+                    if debug {
+                        eprintln!("[DEBUG] reduce_axis0_f32: Using BLAS fallback (Linux)");
+                    }
+                    return finalize_axis0_f32(sums, None, rows, cols, op, false);
+                }
+            }
+        }
+        
+        if debug {
+            eprintln!("[DEBUG] reduce_axis0_f32: All 2048² paths failed, falling through");
+        }
     }
 
     // Fast path for small float32 matrices: try BLAS first if available, then SIMD, then fallback

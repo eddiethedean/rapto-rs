@@ -1934,11 +1934,75 @@ mod neon {
     #[target_feature(enable = "neon")]
     pub unsafe fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         debug_assert_eq!(rows.saturating_mul(cols), data.len());
+        let debug = std::env::var("RAPTORS_DEBUG_AXIS0").is_ok();
+        if debug {
+            eprintln!("[DEBUG] neon::reduce_axis0_columns_f32: rows={}, cols={}, data.len()={}", rows, cols, data.len());
+        }
         let mut out = vec![0.0f32; cols];
         let stride = cols;
         let base_ptr = data.as_ptr();
         let mut col = 0usize;
 
+        // For large matrices (>=512² including 2048²), use tiled approach for better cache locality
+        // This processes data in blocks to keep working set in L1/L2 cache
+        const ROW_TILE_F32: usize = 128; // Process 128 rows at a time (L1 cache friendly)
+        const COL_TILE_F32: usize = 64; // Process 64 columns at a time (fits in L1 cache ~16KB)
+        const MAX_TILE_VECTORS_F32: usize = COL_TILE_F32 / LANES_F32;
+
+        if rows >= 512 && cols >= 512 {
+            if debug {
+                eprintln!("[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for {}x{} (cache-friendly)", rows, cols);
+            }
+            // Tiled reduction for large matrices - more cache-friendly than columnar
+            let mut row_start = 0usize;
+            while row_start < rows {
+                let block_rows = (rows - row_start).min(ROW_TILE_F32);
+                let mut col_idx = 0usize;
+                while col_idx < cols {
+                    let width = (cols - col_idx).min(COL_TILE_F32);
+                    let vec_count = width / LANES_F32;
+                    let tail_start = vec_count * LANES_F32;
+                    let tail = width - tail_start;
+                    let mut vec_acc = [vdupq_n_f32(0.0); MAX_TILE_VECTORS_F32];
+                    let mut tail_acc = [0.0f32; LANES_F32];
+
+                    let mut r = 0usize;
+                    while r < block_rows {
+                        let ptr = base_ptr.add((row_start + r) * stride + col_idx);
+                        for v in 0..vec_count {
+                            let offset = v * LANES_F32;
+                            let vec = vld1q_f32(ptr.add(offset));
+                            vec_acc[v] = vaddq_f32(vec_acc[v], vec);
+                        }
+                        if tail > 0 {
+                            for t in 0..tail {
+                                tail_acc[t] += *ptr.add(tail_start + t);
+                            }
+                        }
+                        r += 1;
+                    }
+
+                    for v in 0..vec_count {
+                        let dst = out.as_mut_ptr().add(col_idx + v * LANES_F32);
+                        let prev = vld1q_f32(dst);
+                        let sum = vaddq_f32(prev, vec_acc[v]);
+                        vst1q_f32(dst, sum);
+                    }
+                    if tail > 0 {
+                        for t in 0..tail {
+                            let idx = col_idx + tail_start + t;
+                            *out.get_unchecked_mut(idx) += tail_acc[t];
+                        }
+                    }
+
+                    col_idx += width;
+                }
+                row_start += block_rows;
+            }
+            return out;
+        }
+
+        // Process 16 columns at once (4 vectors) for other sizes
         while col + COLUMN_BLOCK <= cols {
             let mut acc0 = vdupq_n_f32(0.0);
             let mut acc1 = vdupq_n_f32(0.0);
@@ -1962,20 +2026,10 @@ mod neon {
                 acc3 = vaddq_f32(acc3, vld1q_f32(row_ptr.add(LANES_F32 * 3)));
                 row_ptr = row_ptr.add(stride);
             }
-            let mut buf0 = [0.0f32; LANES_F32];
-            let mut buf1 = [0.0f32; LANES_F32];
-            let mut buf2 = [0.0f32; LANES_F32];
-            let mut buf3 = [0.0f32; LANES_F32];
-            vst1q_f32(buf0.as_mut_ptr(), acc0);
-            vst1q_f32(buf1.as_mut_ptr(), acc1);
-            vst1q_f32(buf2.as_mut_ptr(), acc2);
-            vst1q_f32(buf3.as_mut_ptr(), acc3);
-            for lane in 0..LANES_F32 {
-                out[col + lane] = buf0[lane];
-                out[col + LANES_F32 + lane] = buf1[lane];
-                out[col + LANES_F32 * 2 + lane] = buf2[lane];
-                out[col + LANES_F32 * 3 + lane] = buf3[lane];
-            }
+            vst1q_f32(out.as_mut_ptr().add(col), acc0);
+            vst1q_f32(out.as_mut_ptr().add(col + LANES_F32), acc1);
+            vst1q_f32(out.as_mut_ptr().add(col + LANES_F32 * 2), acc2);
+            vst1q_f32(out.as_mut_ptr().add(col + LANES_F32 * 3), acc3);
             col += COLUMN_BLOCK;
         }
 
@@ -2119,7 +2173,7 @@ mod neon {
         let base_ptr = data.as_ptr();
         let out_ptr = out.as_mut_ptr();
 
-        // For large matrices (2048²), use tiled approach for better cache locality
+        // For large matrices (>=512²), use tiled approach for better cache locality
         // This processes data in blocks to keep working set in L1/L2 cache
         const ROW_TILE_F64: usize = 128; // Process 128 rows at a time (L1 cache friendly)
         const COL_TILE_F64: usize = 64; // Process 64 columns at a time (fits in L1 cache ~16KB)
@@ -2394,7 +2448,35 @@ mod neon {
         let ptr_r = rhs.as_ptr();
         let ptr_o = out.as_mut_ptr();
 
+        // Optimized loop with unrolling for better instruction-level parallelism
+        // Process 4 vectors at a time (16 floats) to improve throughput
+        const UNROLL_FACTOR: usize = 4;
+        const UNROLL_ELEMS: usize = LANES_F32 * UNROLL_FACTOR;
+
         let mut i = 0usize;
+        while i + UNROLL_ELEMS <= len {
+            // Load and process 4 vectors from lhs
+            let a0 = vld1q_f32(ptr_l.add(i));
+            let a1 = vld1q_f32(ptr_l.add(i + LANES_F32));
+            let a2 = vld1q_f32(ptr_l.add(i + LANES_F32 * 2));
+            let a3 = vld1q_f32(ptr_l.add(i + LANES_F32 * 3));
+            
+            // Load and process 4 vectors from rhs
+            let b0 = vld1q_f32(ptr_r.add(i));
+            let b1 = vld1q_f32(ptr_r.add(i + LANES_F32));
+            let b2 = vld1q_f32(ptr_r.add(i + LANES_F32 * 2));
+            let b3 = vld1q_f32(ptr_r.add(i + LANES_F32 * 3));
+            
+            // Add and store results
+            vst1q_f32(ptr_o.add(i), vaddq_f32(a0, b0));
+            vst1q_f32(ptr_o.add(i + LANES_F32), vaddq_f32(a1, b1));
+            vst1q_f32(ptr_o.add(i + LANES_F32 * 2), vaddq_f32(a2, b2));
+            vst1q_f32(ptr_o.add(i + LANES_F32 * 3), vaddq_f32(a3, b3));
+            
+            i += UNROLL_ELEMS;
+        }
+
+        // Process remaining vectors
         while i + LANES_F32 <= len {
             let a = vld1q_f32(ptr_l.add(i));
             let b = vld1q_f32(ptr_r.add(i));
@@ -2403,6 +2485,7 @@ mod neon {
             i += LANES_F32;
         }
 
+        // Process remaining elements
         while i < len {
             *ptr_o.add(i) = *ptr_l.add(i) + *ptr_r.add(i);
             i += 1;

@@ -18,6 +18,7 @@ docker-compose -f docker-compose.bench.yml run --rm bench bash -c "
   export CARGO_TARGET_DIR=/workspace/src/rust/target && \
   export PYTHONPATH=/workspace/.venv/lib/python3.11/site-packages:\$PYTHONPATH && \
   export VIRTUAL_ENV=/workspace/.venv && \
+  export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/openblas-pthread/pkgconfig:/usr/lib/x86_64-linux-gnu/openblas-pthread/pkgconfig:\${PKG_CONFIG_PATH:-} && \
   cd /workspace/src && \
   /workspace/.venv/bin/maturin develop --release --features openblas && \
   mkdir -p '$OUTPUT_DIR' && \
