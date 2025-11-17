@@ -2017,6 +2017,7 @@ mod neon {
         // - Pure columnar (all rows per column block): 1.98x slower (poor cache locality)
         // - 512-row tiles: 1.93x slower (too large for cache)
         // - 128-row tiles: 0.73x NumPy (best performance - optimal cache fit)
+        // Note: Unrolling was tested but caused regression (0.56x → 0.53x)
         if rows == 2048 && cols == 2048 {
             if debug {
                 eprintln!("[DEBUG] neon::reduce_axis0_columns_f32: Using optimized 128×64 tiled path for 2048²");
@@ -2476,7 +2477,138 @@ mod neon {
         let base_ptr = data.as_ptr();
         let out_ptr = out.as_mut_ptr();
 
+        // Specialized path for exactly 1024x1024: optimized tile sizes for this specific dimension
+        // 1024² float64 was very slow (0.03x) with generic path, needs specialized optimization
+        if rows == 1024 && cols == 1024 {
+            if debug {
+                eprintln!("[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 1024x1024 path");
+            }
+            // Optimized tile sizes for 1024x1024 float64: smaller tiles for better L1 cache fit
+            // Row tile of 128 rows * 64 cols * 8 bytes = 64KB (fits in L2, reasonable for L1)
+            const ROW_TILE_1024_F64: usize = 128; // Process 128 rows at a time
+            const COL_TILE_1024_F64: usize = 64; // Process 64 columns at a time
+            const MAX_TILE_VECTORS_1024_F64: usize = COL_TILE_1024_F64 / LANES_F64;
+            const UNROLL_FACTOR_1024_F64: usize = 4; // Unroll 4x for better ILP
+
+            let mut row_start = 0usize;
+            while row_start < rows {
+                let block_rows = (rows - row_start).min(ROW_TILE_1024_F64);
+                let mut col = 0usize;
+                while col < cols {
+                    let width = (cols - col).min(COL_TILE_1024_F64);
+                    let vec_count = width / LANES_F64;
+                    let tail_start = vec_count * LANES_F64;
+                    let tail = width - tail_start;
+                    let mut vec_acc = [vdupq_n_f64(0.0); MAX_TILE_VECTORS_1024_F64];
+                    let mut tail_acc = [0.0f64; LANES_F64];
+
+                    // Prefetch first row of this tile
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        let first_row_ptr = base_ptr.add(row_start * stride + col);
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) first_row_ptr,
+                            options(readonly, nostack)
+                        );
+                    }
+
+                    // Unrolled row-by-row processing with software pipelining
+                    let mut r = 0usize;
+                    while r + UNROLL_FACTOR_1024_F64 <= block_rows {
+                        // Prefetch next unrolled block while processing current
+                        #[cfg(target_arch = "aarch64")]
+                        {
+                            let prefetch_ptr = base_ptr.add((row_start + r + UNROLL_FACTOR_1024_F64) * stride + col);
+                            core::arch::asm!(
+                                "prfm pldl1keep, [{addr}]",
+                                addr = in(reg) prefetch_ptr,
+                                options(readonly, nostack)
+                            );
+                        }
+
+                        // Process 4 rows unrolled for better instruction-level parallelism
+                        for unroll_idx in 0..UNROLL_FACTOR_1024_F64 {
+                            let ptr = base_ptr.add((row_start + r + unroll_idx) * stride + col);
+                            for v in 0..vec_count {
+                                let offset = v * LANES_F64;
+                                let vec = vld1q_f64(ptr.add(offset));
+                                vec_acc[v] = vaddq_f64(vec_acc[v], vec);
+                            }
+                            if tail > 0 {
+                                for t in 0..tail {
+                                    tail_acc[t] += *ptr.add(tail_start + t);
+                                }
+                            }
+                        }
+                        r += UNROLL_FACTOR_1024_F64;
+                    }
+
+                    // Handle remaining rows
+                    while r < block_rows {
+                        let ptr = base_ptr.add((row_start + r) * stride + col);
+                        for v in 0..vec_count {
+                            let offset = v * LANES_F64;
+                            let vec = vld1q_f64(ptr.add(offset));
+                            vec_acc[v] = vaddq_f64(vec_acc[v], vec);
+                        }
+                        if tail > 0 {
+                            for t in 0..tail {
+                                tail_acc[t] += *ptr.add(tail_start + t);
+                            }
+                        }
+                        r += 1;
+                    }
+
+                    // Write results - optimized to avoid unnecessary loads
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        let out_dst = out_ptr.add(col);
+                        core::arch::asm!(
+                            "prfm pldl1keep, [{addr}]",
+                            addr = in(reg) out_dst,
+                            options(readonly, nostack)
+                        );
+                    }
+
+                    if row_start == 0 {
+                        // First tile in this column: write directly
+                        for v in 0..vec_count {
+                            vst1q_f64(out_ptr.add(col + v * LANES_F64), vec_acc[v]);
+                        }
+                    } else {
+                        // Subsequent row tiles: accumulate with previous
+                        for v in 0..vec_count {
+                            let dst = out_ptr.add(col + v * LANES_F64);
+                            let prev = vld1q_f64(dst);
+                            let sum = vaddq_f64(prev, vec_acc[v]);
+                            vst1q_f64(dst, sum);
+                        }
+                    }
+                    if tail > 0 {
+                        if row_start == 0 {
+                            for t in 0..tail {
+                                let idx = col + tail_start + t;
+                                *out_ptr.add(idx) = tail_acc[t];
+                            }
+                        } else {
+                            for t in 0..tail {
+                                let idx = col + tail_start + t;
+                                *out_ptr.add(idx) += tail_acc[t];
+                            }
+                        }
+                    }
+
+                    col += width;
+                }
+                row_start += block_rows;
+            }
+            return out;
+        }
+
         // Specialized path for exactly 2048x2048: optimized tile sizes for this specific dimension
+        // Note: Smaller tiles and increased unrolling were tested but caused regression (0.36x → 0.25x)
+        // Keeping original tile sizes and unrolling factor
         if rows == 2048 && cols == 2048 {
             if debug {
                 eprintln!("[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path");

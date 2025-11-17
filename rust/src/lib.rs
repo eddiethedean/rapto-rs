@@ -4503,12 +4503,89 @@ fn reduce_axis0_f64(
         };
     }
 
-    // Removed specialized 1024² path - let it fall through to generic BLAS path
-    // The generic path may be more efficient and avoids overhead from specialized checks
+    // For 1024² float64, try optimized SIMD first (specialized path added)
+    if rows == 1024 && cols == 1024 {
+        let debug = env::var("RAPTORS_DEBUG_AXIS0").is_ok();
+        if debug {
+            eprintln!("[DEBUG] reduce_axis0_f64: 1024² float64 path");
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Linux: Try optimized SIMD first (specialized 1024² path with tiling and unrolling)
+            if let Some(mut simd_sums) = simd::reduce_axis0_columns_f64(data, rows, cols) {
+                if debug {
+                    eprintln!("[DEBUG] reduce_axis0_f64: Using optimized SIMD path for 1024² (Linux)");
+                }
+                if matches!(op, Reduction::Mean) {
+                    let inv = 1.0 / rows as f64;
+                    for value in &mut simd_sums {
+                        *value *= inv;
+                    }
+                }
+                return AxisOutcome {
+                    values: simd_sums,
+                    parallel: false,
+                };
+            }
+            if debug {
+                eprintln!("[DEBUG] reduce_axis0_f64: SIMD failed, trying BLAS fallback for 1024²");
+            }
+            // Fallback to BLAS if SIMD fails
+            if blas::axis0_enabled() {
+                let mut sums = vec![0.0f64; cols];
+                if blas::current_backend().dgemv_axis0_sum(rows, cols, data, &mut sums) {
+                    if debug {
+                        eprintln!("[DEBUG] reduce_axis0_f64: Using BLAS fallback for 1024² (Linux)");
+                    }
+                    if matches!(op, Reduction::Mean) {
+                        let inv = 1.0 / rows as f64;
+                        for value in &mut sums {
+                            *value *= inv;
+                        }
+                    }
+                    return AxisOutcome {
+                        values: sums,
+                        parallel: false,
+                    };
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // macOS: Try BLAS first (Accelerate is highly optimized)
+            if blas::axis0_enabled() {
+                let mut sums = vec![0.0f64; cols];
+                if blas::current_backend().dgemv_axis0_sum(rows, cols, data, &mut sums) {
+                    if matches!(op, Reduction::Mean) {
+                        let inv = 1.0 / rows as f64;
+                        for value in &mut sums {
+                            *value *= inv;
+                        }
+                    }
+                    return AxisOutcome {
+                        values: sums,
+                        parallel: false,
+                    };
+                }
+            }
+            // Fallback to SIMD if BLAS fails
+            if let Some(mut simd_sums) = simd::reduce_axis0_columns_f64(data, rows, cols) {
+                if matches!(op, Reduction::Mean) {
+                    let inv = 1.0 / rows as f64;
+                    for value in &mut simd_sums {
+                        *value *= inv;
+                    }
+                }
+                return AxisOutcome {
+                    values: simd_sums,
+                    parallel: false,
+                };
+            }
+        }
+    }
 
-    // For exactly 2048², try SIMD first on Linux (can be faster than BLAS)
-    // BLAS has overhead and may not be as optimized as SIMD on Linux/ARM64
-    // On macOS, BLAS (Accelerate) is highly optimized, but on Linux SIMD can be faster
+    // For exactly 2048², prefer BLAS first on Linux (BLAS is faster than SIMD for float64)
+    // Note: Optimized SIMD path was tested but BLAS remains faster (0.36x vs 0.25x)
     if rows == 2048 && cols == 2048 {
         let debug = env::var("RAPTORS_DEBUG_AXIS0").is_ok();
         if debug {
