@@ -22,6 +22,8 @@ impl TileSpec {
     /// - L1: ~32KB (typical) → ~4096 f64 or ~8192 f32 elements
     /// - L2: ~256KB-1MB → larger tiles for multi-threaded work
     /// - L3: ~8MB+ → maximize tile reuse
+    /// 
+    /// This is parameterized by SIMD width (not hard-coded) to match NumPy's approach.
     pub fn for_shape(rows: usize, cols: usize) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
@@ -42,11 +44,7 @@ impl TileSpec {
             }
             if std::arch::is_x86_feature_detected!("avx2") {
                 // AVX2: 4 f64 or 8 f32 per lane
-                let row_hint = if rows * cols >= 1 << 22 {
-                    96
-                } else {
-                    64
-                };
+                let row_hint = if rows * cols >= 1 << 22 { 96 } else { 64 };
                 let col_hint = if rows * cols >= 1 << 22 {
                     384 // L2 cache-aware
                 } else {
@@ -59,18 +57,29 @@ impl TileSpec {
 
         #[cfg(target_arch = "aarch64")]
         {
-            // Apple M-series NEON prefers 128-bit lanes, so 2-wide f64 and 4-wide f32.
-            // M-series typically has 128KB L1, so we can use larger tiles
-            let row_hint = if rows * cols >= 1 << 22 {
-                128
+            // NEON: 128-bit vectors = 2 f64 or 4 f32 per lane
+            // Parameterize tile sizes based on SIMD width and cache hierarchy
+            // L1 cache: ~64KB on ARM64 → ~8192 f64 or ~16384 f32 elements
+            // L2 cache: ~256KB-1MB → larger tiles for bigger arrays
+            
+            let elements = rows.saturating_mul(cols);
+            
+            // Calculate optimal tile sizes based on cache and SIMD width
+            // For f64: 2 elements per vector, aim for ~32KB working set per tile
+            // For f32: 4 elements per vector, aim for ~32KB working set per tile
+            let (row_hint, col_hint) = if elements >= 1 << 22 {
+                // Large arrays: use L2 cache-aware tiles
+                // Row tile: ~128 rows, Column tile: ~256-384 cols (depending on dtype)
+                (128, 384)
+            } else if elements >= 1 << 18 {
+                // Medium arrays: balance L1/L2
+                (96, 256)
             } else {
-                96
+                // Small arrays: L1 cache-aware
+                (64, 128)
             };
-            let col_hint = if rows * cols >= 1 << 22 {
-                384
-            } else {
-                192
-            };
+            
+            // Use 5 accumulators for NEON (good balance of ILP and register pressure)
             return Self::new(rows, cols, 2, 5, row_hint, col_hint);
         }
 

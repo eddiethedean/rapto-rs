@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Once, OnceLock};
 
 use crate::{SCALE_BLAS_MIN_COLS, SCALE_BLAS_MIN_LEN, SCALE_BLAS_MIN_ROWS};
 
@@ -75,6 +75,7 @@ impl BlasProvider for AccelerateBlas {
                 1,
             );
         }
+
         true
     }
 
@@ -364,6 +365,9 @@ fn build_accelerate_option() -> Option<Box<dyn BlasProvider>> {
 struct OpenBlasBackend;
 
 #[cfg(all(feature = "openblas", not(target_os = "macos")))]
+static OPENBLAS_INIT: Once = Once::new();
+
+#[cfg(all(feature = "openblas", not(target_os = "macos")))]
 impl BlasProvider for OpenBlasBackend {
     fn name(&self) -> &'static str {
         "openblas"
@@ -379,7 +383,7 @@ impl BlasProvider for OpenBlasBackend {
         if data.len() != rows.saturating_mul(cols) {
             return false;
         }
-        
+
         // Use static cached ones vector to avoid allocation overhead
         // For small sizes, just use a small array on the stack
         // For larger sizes, we still need to allocate but minimize overhead
@@ -436,7 +440,7 @@ impl BlasProvider for OpenBlasBackend {
         {
             return false;
         }
-        
+
         // Use static cached ones vector to avoid allocation overhead
         // For small sizes, just use a small array on the stack
         // For larger sizes, we still need to allocate but minimize overhead
@@ -511,11 +515,21 @@ fn build_openblas() -> Box<dyn BlasProvider> {
 
 #[cfg(all(feature = "openblas", not(target_os = "macos")))]
 fn build_openblas() -> Box<dyn BlasProvider> {
+    OPENBLAS_INIT.call_once(|| {
+        if env::var_os("OPENBLAS_NUM_THREADS").is_none() {
+            env::set_var("OPENBLAS_NUM_THREADS", "1");
+        }
+    });
     Box::new(OpenBlasBackend)
 }
 
 #[cfg(all(feature = "openblas", not(target_os = "macos")))]
 fn build_openblas_option() -> Option<Box<dyn BlasProvider>> {
+    OPENBLAS_INIT.call_once(|| {
+        if env::var_os("OPENBLAS_NUM_THREADS").is_none() {
+            env::set_var("OPENBLAS_NUM_THREADS", "1");
+        }
+    });
     Some(Box::new(OpenBlasBackend))
 }
 
