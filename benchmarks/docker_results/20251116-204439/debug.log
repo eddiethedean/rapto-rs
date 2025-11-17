@@ -1,0 +1,745 @@
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=512, cols=512, data.len()=262144
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 512x512 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] neon::reduce_axis0_columns_f32: rows=1024, cols=1024, data.len()=1048576
+[DEBUG] neon::reduce_axis0_columns_f32: Using tiled path for 1024x1024 (cache-friendly)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f64: 2048² float64 path
+[DEBUG]   BLAS enabled: true
+[DEBUG]   BLAS backend: openblas
+[DEBUG] simd::reduce_axis0_columns_f64: rows=2048, cols=2048, data.len()=4194304
+[DEBUG] simd::reduce_axis0_columns_f64: Using NEON path (aarch64)
+[DEBUG] neon::reduce_axis0_columns_f64: Using specialized 2048x2048 path
+[DEBUG] reduce_axis0_f64: Using SIMD path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+[DEBUG] reduce_axis0_f32: 2048² float32 path
+[DEBUG] reduce_axis0_f32: Using BLAS path (Linux)
+== NumPy configuration ==
+Build Dependencies:
+  blas:
+    detection method: pkgconfig
+    found: true
+    include directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/include
+    lib directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/lib
+    name: scipy-openblas
+    openblas configuration: OpenBLAS 0.3.30  USE64BITINT DYNAMIC_ARCH NO_AFFINITY
+      neoversev2 MAX_THREADS=64
+    pc file directory: /project/.openblas
+    version: 0.3.30
+  lapack:
+    detection method: pkgconfig
+    found: true
+    include directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/include
+    lib directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/lib
+    name: scipy-openblas
+    openblas configuration: OpenBLAS 0.3.30  USE64BITINT DYNAMIC_ARCH NO_AFFINITY
+      neoversev2 MAX_THREADS=64
+    pc file directory: /project/.openblas
+    version: 0.3.30
+Compilers:
+  c:
+    commands: cc
+    linker: ld.bfd
+    name: gcc
+    version: 14.2.1
+  c++:
+    commands: c++
+    linker: ld.bfd
+    name: gcc
+    version: 14.2.1
+  cython:
+    commands: cython
+    linker: cython
+    name: cython
+    version: 3.1.4
+Machine Information:
+  build:
+    cpu: aarch64
+    endian: little
+    family: aarch64
+    system: linux
+  host:
+    cpu: aarch64
+    endian: little
+    family: aarch64
+    system: linux
+Python Information:
+  path: /tmp/build-env-owyist_s/bin/python
+  version: '3.11'
+SIMD Extensions:
+  baseline:
+  - NEON
+  - NEON_FP16
+  - NEON_VFPV4
+  - ASIMD
+  found:
+  - ASIMDHP
+  - ASIMDFHM
+  not found:
+  - SVE
+
+Benchmarking shape=(512, 512), dtype=float64, elements=262,144
+Warm-up iterations=3, timed repeats=30, layout=contiguous
+
+Operation       Description                     NumPy (ms)  Raptors (ms)   Speedup
+----------------------------------------------------------------------------------
+sum             Total sum                        0.09±0.02     0.05±0.01     1.77x
+mean            Mean of all elements             0.11±0.03     0.05±0.00     2.23x
+mean_axis0      Mean across axis 0               0.10±0.01     0.07±0.00     1.36x
+mean_axis1      Mean across axis 1               0.11±0.02     0.06±0.01     1.99x
+broadcast_add   Broadcast addition               0.13±0.08     0.05±0.00     2.63x
+scale           Scale array                      0.04±0.00     0.08±0.00     0.55x
+
+Speedup shows NumPy time divided by Raptors time (higher is better for Raptors).
+
+========================================================================
+
+Benchmarking shape=(512, 512), dtype=float32, elements=262,144
+Warm-up iterations=3, timed repeats=30, layout=contiguous
+
+Operation       Description                     NumPy (ms)  Raptors (ms)   Speedup
+----------------------------------------------------------------------------------
+sum             Total sum                        0.03±0.00     0.01±0.01     2.10x
+mean            Mean of all elements             0.03±0.00     0.01±0.00     2.94x
+mean_axis0      Mean across axis 0               0.02±0.00     0.02±0.00     1.29x
+mean_axis1      Mean across axis 1               0.04±0.00     0.01±0.00     3.06x
+broadcast_add   Broadcast addition               0.03±0.00     0.04±0.00     0.85x
+scale           Scale array                      0.02±0.00     0.07±0.03     0.32x
+
+Speedup shows NumPy time divided by Raptors time (higher is better for Raptors).
+
+========================================================================
+
+Benchmarking shape=(1024, 1024), dtype=float64, elements=1,048,576
+Warm-up iterations=3, timed repeats=30, layout=contiguous
+
+Operation       Description                     NumPy (ms)  Raptors (ms)   Speedup
+----------------------------------------------------------------------------------
+sum             Total sum                        0.13±0.01     0.22±0.08     0.59x
+mean            Mean of all elements             0.12±0.00     0.09±0.00     1.31x
+mean_axis0      Mean across axis 0               0.30±0.14     0.30±0.17     1.02x
+mean_axis1      Mean across axis 1               0.22±0.14     0.27±0.15     0.80x
+broadcast_add   Broadcast addition               0.53±0.22     0.21±0.02     2.57x
+scale           Scale array                      0.20±0.02     0.52±0.34     0.38x
+
+Speedup shows NumPy time divided by Raptors time (higher is better for Raptors).
+
+========================================================================
+
+Benchmarking shape=(1024, 1024), dtype=float32, elements=1,048,576
+Warm-up iterations=3, timed repeats=30, layout=contiguous
+
+Operation       Description                     NumPy (ms)  Raptors (ms)   Speedup
+----------------------------------------------------------------------------------
+sum             Total sum                        0.11±0.00     0.19±0.05     0.58x
+mean            Mean of all elements             0.11±0.00     0.20±0.04     0.53x
+mean_axis0      Mean across axis 0               0.07±0.00     0.14±0.03     0.54x
+mean_axis1      Mean across axis 1               0.12±0.01     0.04±0.00     2.84x
+broadcast_add   Broadcast addition               0.13±0.00     0.16±0.01     0.82x
+scale           Scale array                      0.08±0.00     0.14±0.00     0.58x
+
+Speedup shows NumPy time divided by Raptors time (higher is better for Raptors).
+
+========================================================================
+
+Benchmarking shape=(2048, 2048), dtype=float64, elements=4,194,304
+Warm-up iterations=3, timed repeats=30, layout=contiguous
+
+Operation       Description                     NumPy (ms)  Raptors (ms)   Speedup
+----------------------------------------------------------------------------------
+sum             Total sum                        0.53±0.09     0.46±0.17     1.16x
+mean            Mean of all elements             0.53±0.09     0.47±0.17     1.12x
+mean_axis0      Mean across axis 0               0.58±0.08     2.31±0.32     0.25x
+mean_axis1      Mean across axis 1               0.56±0.08     0.58±0.11     0.98x
+broadcast_add   Broadcast addition               2.01±0.15     1.56±0.19     1.29x
+scale           Scale array                      1.56±0.19     1.70±0.18     0.92x
+
+Speedup shows NumPy time divided by Raptors time (higher is better for Raptors).
+
+========================================================================
+
+Benchmarking shape=(2048, 2048), dtype=float32, elements=4,194,304
+Warm-up iterations=3, timed repeats=30, layout=contiguous
+
+Operation       Description                     NumPy (ms)  Raptors (ms)   Speedup
+----------------------------------------------------------------------------------
+sum             Total sum                        0.43±0.03     0.20±0.04     2.11x
+mean            Mean of all elements             0.44±0.03     0.19±0.00     2.26x
+mean_axis0      Mean across axis 0               0.30±0.01     1.29±0.68     0.23x
+mean_axis1      Mean across axis 1               0.72±0.35     0.36±0.29     2.02x
+broadcast_add   Broadcast addition               0.66±0.26     0.60±0.10     1.10x
+scale           Scale array                      0.52±0.09     0.50±0.09     1.04x
+
+Speedup shows NumPy time divided by Raptors time (higher is better for Raptors).
+
+Wrote JSON results to benchmarks/docker_results/20251116-204439/results.json
+Wrote NumPy/dispatch metadata to benchmarks/docker_results/20251116-204439/results.metadata.json

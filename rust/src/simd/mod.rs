@@ -2219,7 +2219,7 @@ mod neon {
             return out;
         }
 
-        // For large matrices (>=512² including 2048²), use tiled approach for better cache locality
+        // For matrices >=512², use optimized tiled approach for better cache locality
         // This processes data in blocks to keep working set in L1/L2 cache
         // Optimized tile sizes for ARM64: 32KB L1 cache, 64-byte cache lines
         // Row tile of 128 rows * 64 cols * 4 bytes = 32KB (fits in L1)
@@ -2304,6 +2304,7 @@ mod neon {
         }
 
         // Process 16 columns at once (4 vectors) for other sizes
+        let mut col = 0usize;
         while col + COLUMN_BLOCK <= cols {
             let mut acc0 = vdupq_n_f32(0.0);
             let mut acc1 = vdupq_n_f32(0.0);
@@ -2609,17 +2610,16 @@ mod neon {
             return out;
         }
 
-        // For large matrices (>=512²), use tiled approach for better cache locality
+        // For matrices >=512², use optimized tiled approach for better cache locality
         // This processes data in blocks to keep working set in L1/L2 cache
         // Optimized tile sizes for ARM64: 32KB L1 cache, 64-byte cache lines
         // Row tile of 128 rows * 64 cols * 8 bytes = 64KB (needs L2, but reasonable)
-        // For 2048x2048, we'll use a specialized path with better tile sizes
         const ROW_TILE_F64: usize = 128; // Process 128 rows at a time (L1 cache friendly)
         const COL_TILE_F64: usize = 64; // Process 64 columns at a time (fits in L1 cache ~16KB)
         const MAX_TILE_VECTORS_F64: usize = COL_TILE_F64 / LANES_F64;
         const UNROLL_FACTOR_TILED_F64: usize = 4; // Unroll inner row loop 4x for better ILP
 
-        if rows >= 512 && cols >= 512 {
+        if rows >= 1536 && cols >= 1536 {
             // Tiled reduction for large matrices - more cache-friendly than columnar
             let mut row_start = 0usize;
             while row_start < rows {
