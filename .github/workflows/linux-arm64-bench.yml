@@ -1,0 +1,210 @@
+name: Linux ARM64 Benchmarks
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 0"  # Weekly on Sunday
+  push:
+    branches: ["main"]
+    paths:
+      - "rust/**"
+      - "python/**"
+      - "scripts/linux_baseline_measurement.sh"
+      - ".github/workflows/linux-arm64-bench.yml"
+
+jobs:
+  linux-arm64-benchmarks:
+    name: Linux ARM64 Performance Benchmarks
+    runs-on: ubuntu-22.04-arm64
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libopenblas-dev \
+            python3-dev \
+            python3-venv
+
+      - name: Set up Python virtual environment
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install maturin numpy
+
+      - name: Build Raptors extension
+        run: |
+          source .venv/bin/activate
+          export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/openblas-pthread/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig
+          maturin develop --release --features openblas
+
+      - name: Verify build
+        run: |
+          source .venv/bin/activate
+          python3 -c "import raptors; print('Raptors version:', raptors.__version__ if hasattr(raptors, '__version__') else 'built successfully')"
+
+      - name: Run baseline measurements
+        env:
+          RAPTORS_BLAS: auto
+          RAPTORS_SIMD: auto
+          RAPTORS_THREADS: 10
+        run: |
+          source .venv/bin/activate
+          mkdir -p benchmarks/linux_investigation
+          bash scripts/linux_baseline_measurement.sh
+
+      - name: Run comparison benchmarks
+        env:
+          RAPTORS_BLAS: auto
+          RAPTORS_SIMD: auto
+          RAPTORS_THREADS: 10
+        run: |
+          source .venv/bin/activate
+          mkdir -p benchmarks/results/github-actions-arm64
+          python3 scripts/compare_numpy_raptors.py \
+            --shape 512x512,1024x1024,2048x2048 \
+            --dtype float32,float64 \
+            --operations mean_axis0 \
+            --simd-mode force,auto,disable \
+            --warmup 3 \
+            --repeats 7 \
+            --output-json benchmarks/results/github-actions-arm64/latest.json || true
+
+      - name: Generate performance report
+        run: |
+          source .venv/bin/activate
+          python3 << 'PYEOF'
+          import json
+          import glob
+          import os
+          
+          # Find latest results
+          result_files = glob.glob('benchmarks/linux_investigation/baseline_*.json')
+          result_files = [f for f in result_files if not f.endswith('.metadata.json')]
+          
+          if result_files:
+              latest = sorted(result_files)[-1]
+              with open(latest) as f:
+                  data = json.load(f)
+              
+              print("## Linux ARM64 Benchmark Results (GitHub Actions)")
+              print()
+              print("### Environment")
+              print(f"- Runner: ubuntu-22.04-arm64 (native ARM64)")
+              print(f"- Python: 3.11")
+              print(f"- Rust: stable")
+              print()
+              print("### Results Summary")
+              print()
+              
+              for case in data.get('cases', []):
+                  shape = case['shape']
+                  dtype = case['dtype']
+                  print(f"**{shape[0]}² {dtype}:**")
+                  for op in case.get('operations', []):
+                      speedup = op.get('speedup', 0)
+                      numpy_time = op.get('numpy_mean_s', 0) * 1000
+                      raptors_time = op.get('raptors_mean_s', 0) * 1000
+                      status = "✅" if speedup >= 1.0 else "⚠️"
+                      print(f"  - {op['name']}: {speedup:.3f}x {status} (NumPy: {numpy_time:.3f}ms, Raptors: {raptors_time:.3f}ms)")
+                  print()
+          else:
+              print("No benchmark results found")
+          PYEOF
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-benchmark-results
+          path: |
+            benchmarks/linux_investigation/*.json
+            benchmarks/results/github-actions-arm64/*.json
+          retention-days: 30
+
+      - name: Compare with Docker results
+        if: always()
+        run: |
+          source .venv/bin/activate
+          python3 << 'PYEOF'
+          import json
+          import glob
+          import os
+          
+          print("## Performance Comparison: GitHub Actions ARM64 vs Docker")
+          print()
+          print("Note: This comparison requires Docker benchmark results.")
+          print("Run Docker benchmarks locally and compare manually, or")
+          print("check the uploaded artifacts for detailed results.")
+          print()
+          print("Expected improvements on native ARM64:")
+          print("- Forced SIMD: Should be 5-10x faster than Docker")
+          print("- Auto dispatch: Should be 2-5x faster than Docker")
+          print("- Overall: Should approach macOS performance levels")
+          PYEOF
+
+      - name: Create summary comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { execSync } = require('child_process');
+            
+            // Find result files using shell command
+            try {
+              const resultFiles = execSync('find benchmarks/linux_investigation -name "baseline_*.json" -not -name "*.metadata.json"', { encoding: 'utf8' })
+                .trim()
+                .split('\n')
+                .filter(f => f.length > 0);
+              
+              if (resultFiles.length > 0) {
+                const latest = resultFiles.sort().pop();
+                const data = JSON.parse(fs.readFileSync(latest, 'utf8'));
+                
+                let comment = '## 🚀 Linux ARM64 Benchmark Results (Native Runner)\n\n';
+                comment += 'Performance results from GitHub Actions native ARM64 runner:\n\n';
+                
+                // Add summary of results
+                for (const case of data.cases || []) {
+                  const shape = case.shape;
+                  const dtype = case.dtype;
+                  comment += `### ${shape[0]}² ${dtype}\n\n`;
+                  for (const op of case.operations || []) {
+                    const speedup = op.speedup || 0;
+                    const numpyTime = (op.numpy_mean_s || 0) * 1000;
+                    const raptorsTime = (op.raptors_mean_s || 0) * 1000;
+                    const status = speedup >= 1.0 ? '✅' : '⚠️';
+                    comment += `- **${op.name}**: ${speedup.toFixed(3)}x ${status} (NumPy: ${numpyTime.toFixed(3)}ms, Raptors: ${raptorsTime.toFixed(3)}ms)\n`;
+                  }
+                  comment += '\n';
+                }
+                
+                comment += 'See uploaded artifacts for full results.\n';
+                
+                github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+              }
+            } catch (error) {
+              console.log('Could not create PR comment:', error.message);
+            }
+
