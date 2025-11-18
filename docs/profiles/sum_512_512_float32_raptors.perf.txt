@@ -1,0 +1,6 @@
+WARNING: The /workspace/src/docs/profiles/sum_512_512_float32_raptors.perf.data file's data size field is 0 which is unexpected.
+Was the 'perf record' command properly terminated?
+Error:
+failed to process sample
+# To display the perf.data header info, please use --header/--header-only options.
+#

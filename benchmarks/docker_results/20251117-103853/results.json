@@ -1,0 +1,411 @@
+{
+  "metadata": {
+    "numpy_version": "2.3.4",
+    "numpy_config": {
+      "show": "Build Dependencies:\n  blas:\n    detection method: pkgconfig\n    found: true\n    include directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/include\n    lib directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/lib\n    name: scipy-openblas\n    openblas configuration: OpenBLAS 0.3.30  USE64BITINT DYNAMIC_ARCH NO_AFFINITY\n      neoversev2 MAX_THREADS=64\n    pc file directory: /project/.openblas\n    version: 0.3.30\n  lapack:\n    detection method: pkgconfig\n    found: true\n    include directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/include\n    lib directory: /opt/_internal/cpython-3.11.14/lib/python3.11/site-packages/scipy_openblas64/lib\n    name: scipy-openblas\n    openblas configuration: OpenBLAS 0.3.30  USE64BITINT DYNAMIC_ARCH NO_AFFINITY\n      neoversev2 MAX_THREADS=64\n    pc file directory: /project/.openblas\n    version: 0.3.30\nCompilers:\n  c:\n    commands: cc\n    linker: ld.bfd\n    name: gcc\n    version: 14.2.1\n  c++:\n    commands: c++\n    linker: ld.bfd\n    name: gcc\n    version: 14.2.1\n  cython:\n    commands: cython\n    linker: cython\n    name: cython\n    version: 3.1.4\nMachine Information:\n  build:\n    cpu: aarch64\n    endian: little\n    family: aarch64\n    system: linux\n  host:\n    cpu: aarch64\n    endian: little\n    family: aarch64\n    system: linux\nPython Information:\n  path: /tmp/build-env-owyist_s/bin/python\n  version: '3.11'\nSIMD Extensions:\n  baseline:\n  - NEON\n  - NEON_FP16\n  - NEON_VFPV4\n  - ASIMD\n  found:\n  - ASIMDHP\n  - ASIMDFHM\n  not found:\n  - SVE",
+      "blas_opt_info": {},
+      "lapack_opt_info": {}
+    },
+    "simd_mode": "auto",
+    "layout": "contiguous",
+    "env": {
+      "RAPTORS_THREADS": "10",
+      "RAPTORS_SIMD": null
+    },
+    "timestamp": 1763393941.4670463,
+    "raptors_threading": "ThreadingDiagnostics(parallel_min_elements=32768, baseline_cutovers={'float64': 32768, 'float32': 49152, 'int32': 65536}, dimension_thresholds={'float64': [64, 64], 'float32': [128, 64], 'int32': [128, 128]}, thread_pool={'active_threads': 10}, adaptive_thresholds={'float64': AdaptiveThreshold(dtype='float64', baseline_cutover=32768, recommended_cutover=1006993, median_elements_per_ms=3114100.4176334105, seq_median_elements_per_ms=3596402.1436227225, p95_elements_per_ms=3213081.5869626473, seq_p95_elements_per_ms=3718259.7688570297, variance_ratio=1.031784835443572, seq_variance_ratio=1.0338832033704546, sample_count=9, seq_sample_count=9, samples=[3213203.670478207, 3188876.6904991437, 3082159.2362913005, 3132805.9586221734, 2838865.1318683843, 3084142.3043946945, 3114100.4176334105, 3212898.4616893074, 3106700.8472812413], seq_samples=[3596402.1436227225, 2914482.063754017, 3724406.7709318427, 3709039.2657448095, 3706715.2611215496, 3651853.960807668, 3397229.1181532852, 3183735.4336063927, 3554621.435678219], target_latency_ms=0.28), 'float32': AdaptiveThreshold(dtype='float32', baseline_cutover=49152, recommended_cutover=2512265, median_elements_per_ms=7850826.392138512, seq_median_elements_per_ms=6257036.044718007, p95_elements_per_ms=9015615.876807189, seq_p95_elements_per_ms=6861637.593752102, variance_ratio=1.1483652072392083, seq_variance_ratio=1.0966274678159287, sample_count=9, seq_sample_count=9, samples=[8753323.997687653, 9190477.129553547, 8270749.815134337, 6146626.1220003655, 6689928.192957104, 7850826.392138512, 8045978.069872548, 7349286.589137371, 7606410.393585979], seq_samples=[3263308.259912923, 6970176.983797258, 6475599.381821157, 6257036.044718007, 5655559.076352605, 5481259.997281785, 6698828.508684368, 6257045.378938528, 5324971.08549679], target_latency_ms=0.32), 'int32': AdaptiveThreshold(dtype='int32', baseline_cutover=65536, recommended_cutover=None, median_elements_per_ms=0.0, seq_median_elements_per_ms=0.0, p95_elements_per_ms=None, seq_p95_elements_per_ms=None, variance_ratio=None, seq_variance_ratio=None, sample_count=0, seq_sample_count=0, samples=[], seq_samples=[], target_latency_ms=0.4)}, last_event=LastEvent(dtype='float32', elements=4194304, duration_ms=0.787667, tiles_processed=2048, partial_buffer=2048, parallel=False, operation='scale', chunk_rows=None, chunk_len=None, chunk_count=None, pool_threads=None, strategy=''), backend_usage=[BackendUsage(operation='scale', dtype='float32', backend='simd', count=45), BackendUsage(operation='scale', dtype='float32', backend='openblas', count=90), BackendUsage(operation='scale', dtype='float64', backend='openblas', count=90), BackendUsage(operation='scale', dtype='float64', backend='rayon_simd', count=45)])",
+    "raptors_simd_enabled": true
+  },
+  "cases": [
+    {
+      "shape": [
+        512,
+        512
+      ],
+      "dtype": "float64",
+      "elements": 262144,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "sum",
+          "description": "Total sum",
+          "numpy_mean_s": 4.3366035713786134e-05,
+          "numpy_std_s": 2.2191560539203878e-05,
+          "raptors_mean_s": 5.1988178572262965e-05,
+          "raptors_std_s": 8.613635431069537e-06,
+          "speedup": 0.8341518573017104
+        },
+        {
+          "name": "mean",
+          "description": "Mean of all elements",
+          "numpy_mean_s": 3.1781178570611246e-05,
+          "numpy_std_s": 1.8757255780118033e-06,
+          "raptors_mean_s": 2.3333285709676538e-05,
+          "raptors_std_s": 4.6703047515044925e-08,
+          "speedup": 1.3620532901387004
+        },
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 9.580796428463958e-05,
+          "numpy_std_s": 7.083156859787427e-06,
+          "raptors_mean_s": 8.016514285559748e-05,
+          "raptors_std_s": 2.001241894145078e-05,
+          "speedup": 1.1951324587198666
+        },
+        {
+          "name": "mean_axis1",
+          "description": "Mean across axis 1",
+          "numpy_mean_s": 9.69717142851323e-05,
+          "numpy_std_s": 6.438522757195926e-06,
+          "raptors_mean_s": 6.144189285655395e-05,
+          "raptors_std_s": 7.796683384889445e-06,
+          "speedup": 1.5782670386071678
+        },
+        {
+          "name": "broadcast_add",
+          "description": "Broadcast addition",
+          "numpy_mean_s": 8.393607142766411e-05,
+          "numpy_std_s": 2.0225005058522936e-06,
+          "raptors_mean_s": 0.00010045242857513261,
+          "raptors_std_s": 4.314433716158015e-05,
+          "speedup": 0.8355803101851816
+        },
+        {
+          "name": "scale",
+          "description": "Scale array",
+          "numpy_mean_s": 8.212496428277356e-05,
+          "numpy_std_s": 8.59790421806826e-06,
+          "raptors_mean_s": 0.00016185124999879008,
+          "raptors_std_s": 2.767419467866193e-05,
+          "speedup": 0.5074101329670762
+        }
+      ]
+    },
+    {
+      "shape": [
+        512,
+        512
+      ],
+      "dtype": "float32",
+      "elements": 262144,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "sum",
+          "description": "Total sum",
+          "numpy_mean_s": 8.805510714182674e-05,
+          "numpy_std_s": 5.762498928733294e-05,
+          "raptors_mean_s": 2.4169714286870203e-05,
+          "raptors_std_s": 2.878575873681336e-07,
+          "speedup": 3.6432001676437364
+        },
+        {
+          "name": "mean",
+          "description": "Mean of all elements",
+          "numpy_mean_s": 7.502832142794855e-05,
+          "numpy_std_s": 4.901283129361462e-06,
+          "raptors_mean_s": 2.487342857092147e-05,
+          "raptors_std_s": 2.3555892300611114e-06,
+          "speedup": 3.016404482157364
+        },
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 6.38050357143324e-05,
+          "numpy_std_s": 1.4925261726973207e-05,
+          "raptors_mean_s": 4.504453571436378e-05,
+          "raptors_std_s": 8.036630695817344e-07,
+          "speedup": 1.4164878092857396
+        },
+        {
+          "name": "mean_axis1",
+          "description": "Mean across axis 1",
+          "numpy_mean_s": 9.651207143081462e-05,
+          "numpy_std_s": 1.9976293856512636e-05,
+          "raptors_mean_s": 2.6965750000686383e-05,
+          "raptors_std_s": 6.010276853594559e-08,
+          "speedup": 3.5790612695125485
+        },
+        {
+          "name": "broadcast_add",
+          "description": "Broadcast addition",
+          "numpy_mean_s": 9.17158571433723e-05,
+          "numpy_std_s": 3.034303126456285e-06,
+          "raptors_mean_s": 9.351049999598413e-05,
+          "raptors_std_s": 1.3040073110853252e-05,
+          "speedup": 0.9808081140333021
+        },
+        {
+          "name": "scale",
+          "description": "Scale array",
+          "numpy_mean_s": 3.959821428825957e-05,
+          "numpy_std_s": 3.3124322986818796e-06,
+          "raptors_mean_s": 4.6126499996595225e-05,
+          "raptors_std_s": 2.534576436134387e-05,
+          "speedup": 0.8584699530894924
+        }
+      ]
+    },
+    {
+      "shape": [
+        1024,
+        1024
+      ],
+      "dtype": "float64",
+      "elements": 1048576,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "sum",
+          "description": "Total sum",
+          "numpy_mean_s": 0.00012324849999499423,
+          "numpy_std_s": 4.177586102148175e-06,
+          "raptors_mean_s": 9.40386071448529e-05,
+          "raptors_std_s": 3.432678789686881e-06,
+          "speedup": 1.3106159665375274
+        },
+        {
+          "name": "mean",
+          "description": "Mean of all elements",
+          "numpy_mean_s": 0.000120730749998188,
+          "numpy_std_s": 2.927838590267668e-06,
+          "raptors_mean_s": 9.405932143177356e-05,
+          "raptors_std_s": 3.529043075565342e-06,
+          "speedup": 1.2835596532105615
+        },
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 0.00014180221428513766,
+          "numpy_std_s": 5.184159113229597e-06,
+          "raptors_mean_s": 0.0004959329642904972,
+          "raptors_std_s": 0.0005289618656350506,
+          "speedup": 0.2859302052808809
+        },
+        {
+          "name": "mean_axis1",
+          "description": "Mean across axis 1",
+          "numpy_mean_s": 0.00038215921428579643,
+          "numpy_std_s": 5.300868147906225e-05,
+          "raptors_mean_s": 0.000225992571428841,
+          "raptors_std_s": 2.1066885695271503e-05,
+          "speedup": 1.691025558360568
+        },
+        {
+          "name": "broadcast_add",
+          "description": "Broadcast addition",
+          "numpy_mean_s": 0.000632666535717062,
+          "numpy_std_s": 0.0002546754716896086,
+          "raptors_mean_s": 0.00048585275000030085,
+          "raptors_std_s": 5.11840534351162e-05,
+          "speedup": 1.3021775336594683
+        },
+        {
+          "name": "scale",
+          "description": "Scale array",
+          "numpy_mean_s": 0.00016737353571524442,
+          "numpy_std_s": 1.3709922154529205e-05,
+          "raptors_mean_s": 0.00029562046428972214,
+          "raptors_std_s": 6.549081385893209e-06,
+          "speedup": 0.5661770950715048
+        }
+      ]
+    },
+    {
+      "shape": [
+        1024,
+        1024
+      ],
+      "dtype": "float32",
+      "elements": 1048576,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "sum",
+          "description": "Total sum",
+          "numpy_mean_s": 0.00010659814285673974,
+          "numpy_std_s": 3.346211712788668e-06,
+          "raptors_mean_s": 3.835571428619947e-05,
+          "raptors_std_s": 1.230104931214683e-06,
+          "speedup": 2.7791984803446654
+        },
+        {
+          "name": "mean",
+          "description": "Mean of all elements",
+          "numpy_mean_s": 0.00010813382143380425,
+          "numpy_std_s": 2.0659827330626564e-06,
+          "raptors_mean_s": 3.824403571327041e-05,
+          "raptors_std_s": 1.4033195956806577e-06,
+          "speedup": 2.827468895922053
+        },
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 7.735860714319642e-05,
+          "numpy_std_s": 1.5730137435314041e-06,
+          "raptors_mean_s": 6.576939285655012e-05,
+          "raptors_std_s": 8.638536351197662e-06,
+          "speedup": 1.1762098414367848
+        },
+        {
+          "name": "mean_axis1",
+          "description": "Mean across axis 1",
+          "numpy_mean_s": 0.00012539725000136417,
+          "numpy_std_s": 6.9452600711899555e-06,
+          "raptors_mean_s": 3.813378571696343e-05,
+          "raptors_std_s": 9.438464003232463e-07,
+          "speedup": 3.288350412730789
+        },
+        {
+          "name": "broadcast_add",
+          "description": "Broadcast addition",
+          "numpy_mean_s": 0.00012917571428009263,
+          "numpy_std_s": 2.9358057507181177e-06,
+          "raptors_mean_s": 0.00015865475000254037,
+          "raptors_std_s": 3.0518521379309767e-06,
+          "speedup": 0.8141938030725476
+        },
+        {
+          "name": "scale",
+          "description": "Scale array",
+          "numpy_mean_s": 8.11651071472852e-05,
+          "numpy_std_s": 2.6243149549703045e-06,
+          "raptors_mean_s": 0.00014524700000302055,
+          "raptors_std_s": 4.1152684281184004e-06,
+          "speedup": 0.5588074600204982
+        }
+      ]
+    },
+    {
+      "shape": [
+        2048,
+        2048
+      ],
+      "dtype": "float64",
+      "elements": 4194304,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "sum",
+          "description": "Total sum",
+          "numpy_mean_s": 0.0004850877857113086,
+          "numpy_std_s": 1.720138352963025e-05,
+          "raptors_mean_s": 0.00037987500000420075,
+          "raptors_std_s": 0.0001225571700281085,
+          "speedup": 1.2769668593772805
+        },
+        {
+          "name": "mean",
+          "description": "Mean of all elements",
+          "numpy_mean_s": 0.0004870790000026659,
+          "numpy_std_s": 1.7995024996074434e-05,
+          "raptors_mean_s": 0.00038938550000316193,
+          "raptors_std_s": 0.00012123768707972167,
+          "speedup": 1.2508914687339685
+        },
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 0.0005653750357146643,
+          "numpy_std_s": 6.997755824342445e-06,
+          "raptors_mean_s": 0.00154994342857557,
+          "raptors_std_s": 0.000603790246251348,
+          "speedup": 0.3647714008725181
+        },
+        {
+          "name": "mean_axis1",
+          "description": "Mean across axis 1",
+          "numpy_mean_s": 0.0007627589285681731,
+          "numpy_std_s": 0.00039393709486394604,
+          "raptors_mean_s": 0.0007642827857127697,
+          "raptors_std_s": 0.00039722099526446,
+          "speedup": 0.9980061605820737
+        },
+        {
+          "name": "broadcast_add",
+          "description": "Broadcast addition",
+          "numpy_mean_s": 0.0016992573571467265,
+          "numpy_std_s": 5.521398477588125e-05,
+          "raptors_mean_s": 0.001241215749996424,
+          "raptors_std_s": 5.976842086006103e-05,
+          "speedup": 1.3690265831315966
+        },
+        {
+          "name": "scale",
+          "description": "Scale array",
+          "numpy_mean_s": 0.0012136264999997235,
+          "numpy_std_s": 5.8340110876227965e-05,
+          "raptors_mean_s": 0.0014420951785741717,
+          "raptors_std_s": 7.536470052143243e-05,
+          "speedup": 0.841571706244563
+        }
+      ]
+    },
+    {
+      "shape": [
+        2048,
+        2048
+      ],
+      "dtype": "float32",
+      "elements": 4194304,
+      "layout": "contiguous",
+      "operations": [
+        {
+          "name": "sum",
+          "description": "Total sum",
+          "numpy_mean_s": 0.0004313882500010128,
+          "numpy_std_s": 6.137799869006051e-06,
+          "raptors_mean_s": 0.00020151792856942002,
+          "raptors_std_s": 9.100862123142406e-06,
+          "speedup": 2.140694145992106
+        },
+        {
+          "name": "mean",
+          "description": "Mean of all elements",
+          "numpy_mean_s": 0.0004341979642877699,
+          "numpy_std_s": 4.9543378188461875e-06,
+          "raptors_mean_s": 0.0001990625357147938,
+          "raptors_std_s": 3.950476102198382e-06,
+          "speedup": 2.1812138719556233
+        },
+        {
+          "name": "mean_axis0",
+          "description": "Mean across axis 0",
+          "numpy_mean_s": 0.00028665910714563225,
+          "numpy_std_s": 8.934649859446196e-06,
+          "raptors_mean_s": 0.0004783451428563369,
+          "raptors_std_s": 3.122602284578447e-05,
+          "speedup": 0.5992725366330846
+        },
+        {
+          "name": "mean_axis1",
+          "description": "Mean across axis 1",
+          "numpy_mean_s": 0.0004846666071399243,
+          "numpy_std_s": 6.123039046886998e-06,
+          "raptors_mean_s": 0.00017092560714258655,
+          "raptors_std_s": 1.267119232371124e-05,
+          "speedup": 2.835541234822786
+        },
+        {
+          "name": "broadcast_add",
+          "description": "Broadcast addition",
+          "numpy_mean_s": 0.000544503035712296,
+          "numpy_std_s": 1.609295064777837e-05,
+          "raptors_mean_s": 0.0005408333571464498,
+          "raptors_std_s": 4.8530020978365866e-05,
+          "speedup": 1.0067852297151347
+        },
+        {
+          "name": "scale",
+          "description": "Scale array",
+          "numpy_mean_s": 0.0004893779642825637,
+          "numpy_std_s": 7.69226218347649e-05,
+          "raptors_mean_s": 0.0006277128214315601,
+          "raptors_std_s": 0.00012845423289713196,
+          "speedup": 0.7796207876820003
+        }
+      ]
+    }
+  ]
+}

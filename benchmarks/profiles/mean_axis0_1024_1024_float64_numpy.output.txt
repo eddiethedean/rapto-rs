@@ -1,0 +1,2 @@
+NumPy: 0.168ms per iteration
+Result shape: (1024,), sum: -0.806299

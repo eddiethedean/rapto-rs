@@ -1,0 +1,6 @@
+WARNING: The /workspace/src/docs/profiles/broadcast_add_1024_1024_float64_numpy.perf.data file's data size field is 0 which is unexpected.
+Was the 'perf record' command properly terminated?
+Error:
+failed to process sample
+# To display the perf.data header info, please use --header/--header-only options.
+#

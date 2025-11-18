@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/tmp/profile_mean_axis0_raptors.py", line 34, in <module>
+    arr = raptors.array(data)
+  File "/Users/odosmatthews/Documents/coding/rapto-rs/python/raptors/__init__.py", line 74, in array
+    return _core.array(values)
+TypeError: expected a sequence of sequences for multi-dimensional input

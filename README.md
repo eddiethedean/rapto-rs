@@ -57,6 +57,8 @@ cd /workspace/src
 /workspace/.venv/bin/python scripts/compare_numpy_raptors.py --suite 2d
 ```
 
+**Testing on Linux**: See [docs/linux_testing_guide.md](docs/linux_testing_guide.md) for detailed instructions on running all tests (Rust and Python) in the Docker environment.
+
 See [docs/linux_development_guide.md](docs/linux_development_guide.md) for detailed instructions on:
 - Setting up the Docker environment
 - Building and running the project

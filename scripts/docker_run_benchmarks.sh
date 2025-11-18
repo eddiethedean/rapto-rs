@@ -45,3 +45,15 @@ $DOCKER_COMPOSE_CMD -f docker-compose.bench.yml run --rm bench bash -c "
 
 echo "Benchmarks completed. Results saved to: $OUTPUT_DIR"
 
+if [ -x "$ROOT_DIR/.venv/bin/python" ]; then
+  echo "Verifying results against baselines..."
+  if ! "$ROOT_DIR/.venv/bin/python" "$ROOT_DIR/scripts/validate_benchmark_results.py" \
+    --results-dir "$OUTPUT_DIR" \
+    --baseline-dir "$ROOT_DIR/benchmarks/baselines" \
+    --allow-missing-baseline; then
+    echo "[warn] Regression check failed for $OUTPUT_DIR" >&2
+  fi
+else
+  echo "[warn] Skipping regression check: $ROOT_DIR/.venv/bin/python not found" >&2
+fi
+

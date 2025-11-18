@@ -8,7 +8,7 @@ pub(crate) const SMALL_DIRECT_THRESHOLD: usize = 1 << 12;
 // Cache-aware chunk sizes: L1 cache ~32KB, so ~4096 f64 or ~8192 f32 elements
 const F64_PAR_CHUNK: usize = 1 << 12; // 4096 elements = 32KB
 const F32_PAR_CHUNK: usize = 1 << 13; // 8192 elements = 32KB
-// L2 cache-aware chunks for larger arrays
+                                      // L2 cache-aware chunks for larger arrays
 const F64_L2_CHUNK: usize = 1 << 16; // 65536 elements = 512KB
 const F32_L2_CHUNK: usize = 1 << 17; // 131072 elements = 512KB
 
@@ -84,7 +84,8 @@ pub fn reduce_full_f64(
     // Parallel path has overhead that makes it slower for these sizes
     // Keep sequential for both sum and mean at 1M elements (sequential path is optimized)
     let prefer_sequential = elements >= 1 << 20 && elements < DIRECT_PARALLEL_MIN_ELEMENTS;
-    let allow_parallel = (allow_parallel || elements >= DIRECT_PARALLEL_MIN_ELEMENTS) && !prefer_sequential;
+    let allow_parallel =
+        (allow_parallel || elements >= DIRECT_PARALLEL_MIN_ELEMENTS) && !prefer_sequential;
 
     let direct_pool = if allow_parallel { pool } else { None };
     let (total, parallel_used) = fast_sum_f64(data, direct_pool, allow_parallel);
@@ -219,8 +220,7 @@ fn fast_sum_f64(
         // Very large arrays: use 16384 element chunks
         let mut sum = 0.0;
         for chunk in data.chunks(1 << 14) {
-            sum += simd::reduce_sum_f64(chunk, 8)
-                .unwrap_or_else(|| chunk.iter().copied().sum());
+            sum += simd::reduce_sum_f64(chunk, 8).unwrap_or_else(|| chunk.iter().copied().sum());
         }
         sum
     } else if data.len() >= 1 << 20 {
@@ -293,12 +293,14 @@ fn direct_sum_f32(data: &[f32], rows: usize, cols: usize, pool: Option<&rayon::T
                 // Medium arrays: use L1 cache-sized chunks
                 base_chunk_len.max(F32_PAR_CHUNK).min(elements)
             };
+            // Use accumulator count based on overall data size for better SIMD utilization
+            let acc = recommended_accumulators(elements, 8);
             return pool.install(|| {
                 use rayon::prelude::*;
                 data.par_chunks(chunk_len)
                     .map(|chunk| {
-                        let acc = recommended_accumulators(chunk.len(), 8);
-                        simd::reduce_sum_f32(chunk, acc)
+                        // Use the overall data size accumulator count, but ensure at least 1
+                        simd::reduce_sum_f32(chunk, acc.max(1))
                             .unwrap_or_else(|| chunk.iter().map(|&v| v as f64).sum::<f64>())
                     })
                     .sum()
@@ -306,11 +308,14 @@ fn direct_sum_f32(data: &[f32], rows: usize, cols: usize, pool: Option<&rayon::T
         }
     }
     // Sequential path with cache-aware processing
+    // Use accumulator count based on overall data size, not chunk size, for better SIMD utilization
     let acc = recommended_accumulators(data.len(), 8);
     if data.len() >= F32_PAR_CHUNK {
         let mut sum = 0.0;
         for chunk in data.chunks(F32_PAR_CHUNK) {
-            sum += simd::reduce_sum_f32(chunk, recommended_accumulators(chunk.len(), 8))
+            // Use the overall data size accumulator count, but ensure at least 1
+            // This maintains cache efficiency while using optimal SIMD parallelism
+            sum += simd::reduce_sum_f32(chunk, acc.max(1))
                 .unwrap_or_else(|| chunk.iter().map(|&v| v as f64).sum::<f64>());
         }
         sum

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::sync::{Once, OnceLock};
+use std::sync::OnceLock;
 
 use crate::{SCALE_BLAS_MIN_COLS, SCALE_BLAS_MIN_LEN, SCALE_BLAS_MIN_ROWS};
 
@@ -159,6 +159,92 @@ pub fn axis0_enabled() -> bool {
             .or_else(|| env_list_flag("RAPTORS_BLAS_OPS", "axis0"))
             .unwrap_or_else(|| backend_name() != "none")
     })
+}
+
+/// BLAS configuration information (similar to np.show_config())
+#[derive(Debug, Clone)]
+pub struct BlasConfig {
+    pub backend: String,
+    pub version: Option<String>,
+    pub threading: BlasThreadingConfig,
+    pub enabled_ops: BlasEnabledOps,
+}
+
+#[derive(Debug, Clone)]
+pub struct BlasThreadingConfig {
+    pub openblas_threads: Option<String>,
+    pub mkl_threads: Option<String>,
+    pub omp_threads: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BlasEnabledOps {
+    pub scale: bool,
+    pub axis0: bool,
+}
+
+impl BlasConfig {
+    pub fn new() -> Self {
+        Self {
+            backend: backend_name().to_string(),
+            version: get_blas_version(),
+            threading: BlasThreadingConfig {
+                openblas_threads: env::var("OPENBLAS_NUM_THREADS").ok(),
+                mkl_threads: env::var("MKL_NUM_THREADS").ok(),
+                omp_threads: env::var("OMP_NUM_THREADS").ok(),
+            },
+            enabled_ops: BlasEnabledOps {
+                scale: scale_enabled(),
+                axis0: axis0_enabled(),
+            },
+        }
+    }
+    
+    pub fn to_string(&self) -> String {
+        let mut lines = vec![
+            format!("BLAS backend: {}", self.backend),
+        ];
+        
+        if let Some(version) = &self.version {
+            lines.push(format!("BLAS version: {}", version));
+        }
+        
+        lines.push("Threading configuration:".to_string());
+        if let Some(threads) = &self.threading.openblas_threads {
+            lines.push(format!("  OPENBLAS_NUM_THREADS: {}", threads));
+        }
+        if let Some(threads) = &self.threading.mkl_threads {
+            lines.push(format!("  MKL_NUM_THREADS: {}", threads));
+        }
+        if let Some(threads) = &self.threading.omp_threads {
+            lines.push(format!("  OMP_NUM_THREADS: {}", threads));
+        }
+        
+        lines.push("Enabled operations:".to_string());
+        lines.push(format!("  scale: {}", self.enabled_ops.scale));
+        lines.push(format!("  axis0: {}", self.enabled_ops.axis0));
+        
+        lines.join("\n")
+    }
+}
+
+fn get_blas_version() -> Option<String> {
+    // Try to get OpenBLAS version if available
+    #[cfg(all(feature = "openblas", not(target_os = "macos")))]
+    {
+        // OpenBLAS doesn't expose version easily, but we can check the library
+        // For now, return None - can be enhanced with actual version detection
+        None
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Accelerate framework version
+        Some("Accelerate".to_string())
+    }
+    #[cfg(not(any(all(feature = "openblas", not(target_os = "macos")), target_os = "macos")))]
+    {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -516,8 +602,14 @@ fn build_openblas() -> Box<dyn BlasProvider> {
 #[cfg(all(feature = "openblas", not(target_os = "macos")))]
 fn build_openblas() -> Box<dyn BlasProvider> {
     OPENBLAS_INIT.call_once(|| {
+        // NumPy approach: Check multiple threading environment variables
+        // Priority: OPENBLAS_NUM_THREADS > MKL_NUM_THREADS > OMP_NUM_THREADS
         if env::var_os("OPENBLAS_NUM_THREADS").is_none() {
-            env::set_var("OPENBLAS_NUM_THREADS", "1");
+            // Check if MKL or OMP threads are set, otherwise default to 1
+            let threads = env::var("MKL_NUM_THREADS")
+                .or_else(|| env::var("OMP_NUM_THREADS"))
+                .unwrap_or_else(|| "1".to_string());
+            env::set_var("OPENBLAS_NUM_THREADS", &threads);
         }
     });
     Box::new(OpenBlasBackend)
@@ -526,8 +618,14 @@ fn build_openblas() -> Box<dyn BlasProvider> {
 #[cfg(all(feature = "openblas", not(target_os = "macos")))]
 fn build_openblas_option() -> Option<Box<dyn BlasProvider>> {
     OPENBLAS_INIT.call_once(|| {
+        // NumPy approach: Check multiple threading environment variables
+        // Priority: OPENBLAS_NUM_THREADS > MKL_NUM_THREADS > OMP_NUM_THREADS
         if env::var_os("OPENBLAS_NUM_THREADS").is_none() {
-            env::set_var("OPENBLAS_NUM_THREADS", "1");
+            // Check if MKL or OMP threads are set, otherwise default to 1
+            let threads = env::var("MKL_NUM_THREADS")
+                .or_else(|| env::var("OMP_NUM_THREADS"))
+                .unwrap_or_else(|| "1".to_string());
+            env::set_var("OPENBLAS_NUM_THREADS", &threads);
         }
     });
     Some(Box::new(OpenBlasBackend))
