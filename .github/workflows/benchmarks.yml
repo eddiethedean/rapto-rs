@@ -27,7 +27,7 @@ jobs:
           python -m pip install asv maturin numpy
       - name: Install Raptors
         run: |
-          python -m pip install .
+          maturin develop --release
       - name: Run ASV quick suite
         working-directory: benchmarks
         env:
@@ -60,7 +60,7 @@ jobs:
           python -m pip install asv maturin numpy
       - name: Install Raptors
         run: |
-          python -m pip install .
+          maturin develop --release
       - name: Run ASV full sweep
         working-directory: benchmarks
         env:
