@@ -7,7 +7,6 @@ on:
 
 env:
   RAPTORS_THREADS: "10"
-  PYTHONPATH: "python"
   RAPTORS_SIMD: "auto"
 
 jobs:
@@ -57,7 +56,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           source .venv/bin/activate
-          pip install .
+          maturin develop --release
         env:
           VIRTUAL_ENV: ${{ github.workspace }}/.venv
 
@@ -66,7 +65,7 @@ jobs:
         shell: pwsh
         run: |
           & "${{ github.workspace }}\.venv\Scripts\Activate.ps1"
-          pip install .
+          maturin develop --release
         env:
           VIRTUAL_ENV: ${{ github.workspace }}\.venv
 
@@ -77,7 +76,6 @@ jobs:
           source ${{ github.workspace }}/.venv/bin/activate
           python -m asv machine --yes || echo "Note: ASV machine setup completed"
         env:
-          PYTHONPATH: ${{ github.workspace }}/python
           VIRTUAL_ENV: ${{ github.workspace }}/.venv
 
       - name: Set up ASV machine info (Windows)
@@ -86,10 +84,8 @@ jobs:
         shell: pwsh
         run: |
           & "${{ github.workspace }}\.venv\Scripts\Activate.ps1"
-          $env:PYTHONPATH = "${{ github.workspace }}\python"
           python -m asv machine --yes
         env:
-          PYTHONPATH: ${{ github.workspace }}\python
           VIRTUAL_ENV: ${{ github.workspace }}\.venv
 
       - name: Run ASV quick benchmarks (Linux)
@@ -100,7 +96,6 @@ jobs:
           python -m asv run --python=same --quick --show-stderr
         env:
           RAPTORS_THREADS: "10"
-          PYTHONPATH: ${{ github.workspace }}/python
           RAPTORS_SIMD: "auto"
           VIRTUAL_ENV: ${{ github.workspace }}/.venv
 
@@ -111,12 +106,10 @@ jobs:
         run: |
           & "${{ github.workspace }}\.venv\Scripts\Activate.ps1"
           $env:RAPTORS_THREADS = "10"
-          $env:PYTHONPATH = "${{ github.workspace }}\python"
           $env:RAPTORS_SIMD = "auto"
           python -m asv run --python=same --quick --show-stderr
         env:
           RAPTORS_THREADS: "10"
-          PYTHONPATH: ${{ github.workspace }}\python
           RAPTORS_SIMD: "auto"
           VIRTUAL_ENV: ${{ github.workspace }}\.venv
 
@@ -128,7 +121,6 @@ jobs:
           python -m asv publish || echo "Note: ASV publish may have warnings"
         continue-on-error: true
         env:
-          PYTHONPATH: ${{ github.workspace }}/python
           VIRTUAL_ENV: ${{ github.workspace }}/.venv
 
       - name: Publish ASV HTML reports (Windows)
@@ -137,11 +129,9 @@ jobs:
         shell: pwsh
         run: |
           & "${{ github.workspace }}\.venv\Scripts\Activate.ps1"
-          $env:PYTHONPATH = "${{ github.workspace }}\python"
           python -m asv publish || echo "Note: ASV publish may have warnings"
         continue-on-error: true
         env:
-          PYTHONPATH: ${{ github.workspace }}\python
           VIRTUAL_ENV: ${{ github.workspace }}\.venv
 
       - name: Show ASV results summary (Linux)
@@ -152,7 +142,6 @@ jobs:
           python -m asv show | head -50 || echo "Note: ASV show may have warnings"
         continue-on-error: true
         env:
-          PYTHONPATH: ${{ github.workspace }}/python
           VIRTUAL_ENV: ${{ github.workspace }}/.venv
 
       - name: Show ASV results summary (Windows)
@@ -161,11 +150,9 @@ jobs:
         shell: pwsh
         run: |
           & "${{ github.workspace }}\.venv\Scripts\Activate.ps1"
-          $env:PYTHONPATH = "${{ github.workspace }}\python"
           python -m asv show | Select-Object -First 50
         continue-on-error: true
         env:
-          PYTHONPATH: ${{ github.workspace }}\python
           VIRTUAL_ENV: ${{ github.workspace }}\.venv
 
       - name: Upload ASV results
