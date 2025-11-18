@@ -2,6 +2,49 @@
 
 use std::sync::OnceLock;
 
+#[cfg(target_arch = "aarch64")]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(target_arch = "aarch64")]
+fn log_neon_axis0_alignment(
+    label: &str,
+    rows: usize,
+    cols: usize,
+    data_ptr: *const u8,
+    elem_size: usize,
+    lane_width: usize,
+) {
+    static LOGGED: AtomicUsize = AtomicUsize::new(0);
+    if LOGGED.fetch_add(1, Ordering::Relaxed) >= 16 {
+        return;
+    }
+    let addr = data_ptr as usize;
+    let align = addr & 0x3f;
+    let stride_bytes = cols * elem_size;
+    let row_bytes = rows * elem_size;
+    let tail_cols = cols % lane_width;
+    eprintln!(
+        "[DEBUG] {label}: ptr=0x{addr:x} align={} stride_mod64={} row_mod64={} tail_cols={} rows={} cols={}",
+        align,
+        stride_bytes & 63,
+        row_bytes & 63,
+        tail_cols,
+        rows,
+        cols
+    );
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn log_neon_axis0_alignment(
+    _label: &str,
+    _rows: usize,
+    _cols: usize,
+    _data_ptr: *const u8,
+    _elem_size: usize,
+    _lane_width: usize,
+) {
+}
+
 mod backend;
 pub use backend::{prefetched_rows, row_tile_f32, row_tile_f64};
 
@@ -384,9 +427,32 @@ pub fn add_assign_inplace_f32(acc: &mut [f32], row: &[f32]) -> bool {
     false
 }
 
+#[inline]
 pub fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Option<Vec<f32>> {
     if cols == 0 {
         return Some(Vec::new());
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let expected = rows.checked_mul(cols).unwrap_or_default();
+        debug_assert!(
+            data.len() == expected,
+            "axis0 f32 slice len mismatch: expected {} elements, got {}",
+            expected,
+            data.len()
+        );
+    }
+
+    if std::env::var("RAPTORS_DEBUG_AXIS0").is_ok() {
+        log_neon_axis0_alignment(
+            "reduce_axis0_columns_f32",
+            rows,
+            cols,
+            data.as_ptr() as *const u8,
+            std::mem::size_of::<f32>(),
+            4,
+        );
     }
     let elements = rows.checked_mul(cols)?;
     if elements != data.len() {
@@ -432,9 +498,11 @@ pub fn reduce_axis0_columns_f32_columnar(
     }
 }
 
+#[inline]
 pub fn reduce_axis0_columns_f64(data: &[f64], rows: usize, cols: usize) -> Option<Vec<f64>> {
-    use std::env;
-    let debug = env::var("RAPTORS_DEBUG_AXIS0").is_ok();
+    // Cache debug flag to avoid repeated env::var calls (expensive)
+    static DEBUG: OnceLock<bool> = OnceLock::new();
+    let debug = *DEBUG.get_or_init(|| std::env::var("RAPTORS_DEBUG_AXIS0").is_ok());
     if debug {
         eprintln!(
             "[DEBUG] simd::reduce_axis0_columns_f64: rows={}, cols={}, data.len()={}",
@@ -443,6 +511,28 @@ pub fn reduce_axis0_columns_f64(data: &[f64], rows: usize, cols: usize) -> Optio
             data.len()
         );
     }
+    #[cfg(debug_assertions)]
+    {
+        let expected = rows.checked_mul(cols).unwrap_or_default();
+        debug_assert!(
+            data.len() == expected,
+            "axis0 f64 slice len mismatch: expected {} elements, got {}",
+            expected,
+            data.len()
+        );
+    }
+
+    if debug {
+        log_neon_axis0_alignment(
+            "reduce_axis0_columns_f64",
+            rows,
+            cols,
+            data.as_ptr() as *const u8,
+            std::mem::size_of::<f64>(),
+            2,
+        );
+    }
+
     if cols == 0 {
         if debug {
             eprintln!("[DEBUG] simd::reduce_axis0_columns_f64: cols == 0, returning empty vec");
@@ -1877,6 +1967,7 @@ mod x86 {
 #[cfg(target_arch = "aarch64")]
 mod neon {
     use std::arch::aarch64::*;
+    use std::sync::OnceLock;
 
     const LANES_F64: usize = 2;
     const LANES_F32: usize = 4;
@@ -1891,6 +1982,145 @@ mod neon {
     const MAX_TILE_VECTORS_F32: usize = COL_TILE_F32 / LANES_F32;
     pub(super) const TILED_MIN_ROWS_F32: usize = 64;
     pub(super) const TILED_MIN_COLS_F32: usize = COL_TILE_F32;
+
+    // Prefetch control via environment variables
+    // RAPTORS_DISABLE_PREFETCH=1: Disable all prefetch hints
+    // RAPTORS_PREFETCH_LEVEL=1|2|3: Set prefetch level (pldl1keep, pldl2keep, pldl3keep)
+    // RAPTORS_PREFETCH_DISTANCE=N: Set prefetch distance in rows (default: 1)
+    
+    #[inline(always)]
+    fn should_prefetch() -> bool {
+        static DISABLED: OnceLock<bool> = OnceLock::new();
+        !*DISABLED.get_or_init(|| std::env::var("RAPTORS_DISABLE_PREFETCH").is_ok())
+    }
+    
+    #[inline(always)]
+    fn prefetch_level() -> u8 {
+        static LEVEL: OnceLock<u8> = OnceLock::new();
+        *LEVEL.get_or_init(|| {
+            std::env::var("RAPTORS_PREFETCH_LEVEL")
+                .ok()
+                .and_then(|v| v.parse::<u8>().ok())
+                .filter(|&l| l >= 1 && l <= 3)
+                .unwrap_or(1)
+        })
+    }
+    
+    #[inline(always)]
+    fn prefetch_level_for_size(rows: usize, cols: usize) -> Option<u8> {
+        // Size-based prefetch optimization based on test results:
+        // - 512x512: L1 prefetch helps (default)
+        // - 1024x1024: No prefetch is best (8.2% faster)
+        // - 2048x2048: L3 prefetch is best (2.6% faster)
+        
+        // Check if environment variable overrides size-based selection
+        // Cache the check to avoid repeated env var lookups
+        static ENV_OVERRIDE: OnceLock<Option<u8>> = OnceLock::new();
+        if let Some(level) = *ENV_OVERRIDE.get_or_init(|| {
+            std::env::var("RAPTORS_PREFETCH_LEVEL")
+                .ok()
+                .and_then(|v| v.parse::<u8>().ok())
+                .filter(|&l| l >= 1 && l <= 3)
+        }) {
+            return Some(level);
+        }
+        
+        // Size-based selection (only if env var not set)
+        if rows == 1024 && cols == 1024 {
+            // Disable prefetch for 1024x1024 (8.2% faster)
+            return None;
+        } else if rows == 2048 && cols == 2048 {
+            // Use L3 prefetch for 2048x2048 (2.6% faster than L1)
+            return Some(3);
+        }
+        // For other sizes (including 512x512), use default L1
+        Some(1)
+    }
+    
+    #[inline(always)]
+    fn prefetch_distance() -> usize {
+        static DISTANCE: OnceLock<usize> = OnceLock::new();
+        *DISTANCE.get_or_init(|| {
+            std::env::var("RAPTORS_PREFETCH_DISTANCE")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(1)
+        })
+    }
+    
+    #[inline(always)]
+    unsafe fn emit_prefetch_load(addr: *const f64) {
+        if !should_prefetch() {
+            return;
+        }
+        let level = prefetch_level();
+        match level {
+            2 => {
+                core::arch::asm!(
+                    "prfm pldl2keep, [{addr}]",
+                    addr = in(reg) addr,
+                    options(readonly, nostack)
+                );
+            }
+            3 => {
+                core::arch::asm!(
+                    "prfm pldl3keep, [{addr}]",
+                    addr = in(reg) addr,
+                    options(readonly, nostack)
+                );
+            }
+            _ => {
+                core::arch::asm!(
+                    "prfm pldl1keep, [{addr}]",
+                    addr = in(reg) addr,
+                    options(readonly, nostack)
+                );
+            }
+        }
+    }
+    
+    #[inline(always)]
+    unsafe fn emit_prefetch_load_sized(addr: *const f64, rows: usize, cols: usize) {
+        // Use size-based prefetch level if available, otherwise fall back to default
+        if let Some(level) = prefetch_level_for_size(rows, cols) {
+            match level {
+                2 => {
+                    core::arch::asm!(
+                        "prfm pldl2keep, [{addr}]",
+                        addr = in(reg) addr,
+                        options(readonly, nostack)
+                    );
+                }
+                3 => {
+                    core::arch::asm!(
+                        "prfm pldl3keep, [{addr}]",
+                        addr = in(reg) addr,
+                        options(readonly, nostack)
+                    );
+                }
+                _ => {
+                    core::arch::asm!(
+                        "prfm pldl1keep, [{addr}]",
+                        addr = in(reg) addr,
+                        options(readonly, nostack)
+                    );
+                }
+            }
+        }
+        // If prefetch_level_for_size returns None, no prefetch is emitted (for 1024x1024)
+    }
+    
+    #[inline(always)]
+    unsafe fn emit_prefetch_store(addr: *mut f64) {
+        if !should_prefetch() {
+            return;
+        }
+        core::arch::asm!(
+            "prfm pstl1keep, [{addr}]",
+            addr = in(reg) addr,
+            options(nostack)
+        );
+    }
 
     #[inline(always)]
     unsafe fn reduce_sum_f64_fixed<const ACC: usize>(input: &[f64]) -> f64 {
@@ -1999,7 +2229,7 @@ mod neon {
         while col < cols {
             let mut acc = vdupq_n_f32(0.0);
             let mut row_ptr = base_ptr.add(col);
-            for row_idx in 0..rows {
+            for _row_idx in 0..rows {
                 acc = vaddq_f32(acc, vld1q_f32(row_ptr));
                 row_ptr = row_ptr.add(stride);
             }
@@ -2013,6 +2243,16 @@ mod neon {
     pub unsafe fn reduce_axis0_columns_f32(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         debug_assert_eq!(rows.saturating_mul(cols), data.len());
         let debug = std::env::var("RAPTORS_DEBUG_AXIS0").is_ok();
+        if debug {
+            super::log_neon_axis0_alignment(
+                "neon::reduce_axis0_columns_f32",
+                rows,
+                cols,
+                data.as_ptr() as *const u8,
+                std::mem::size_of::<f32>(),
+                4,
+            );
+        }
         
         // TODO: Code-generated kernels are currently disabled due to performance regressions
         // Need to investigate and fix the tiled accumulation logic
@@ -2434,12 +2674,24 @@ mod neon {
             return out;
         }
 
-        // For matrices >=512², use optimized tiled approach for better cache locality
-        // This processes data in blocks to keep working set in L1/L2 cache
-        // Optimized tile sizes for ARM64: 32KB L1 cache, 64-byte cache lines
-        // Row tile of 128 rows * 64 cols * 4 bytes = 32KB (fits in L1)
-        const ROW_TILE_F32: usize = 128; // Process 128 rows at a time (L1 cache friendly)
-        const COL_TILE_F32: usize = 64; // Process 64 columns at a time (fits in L1 cache ~16KB)
+        if debug {
+            eprintln!(
+                "[DEBUG] neon::reduce_axis0_columns_f64: entering generic column path (rows={}, cols={}, tail_cols={})",
+                rows,
+                cols,
+                cols % LANES_F64
+            );
+        }
+
+        // For matrices >=512², use optimized tiled approach for better cache locality.
+        #[cfg(target_os = "linux")]
+        const ROW_TILE_F32: usize = 96;
+        #[cfg(not(target_os = "linux"))]
+        const ROW_TILE_F32: usize = 128;
+        #[cfg(target_os = "linux")]
+        const COL_TILE_F32: usize = 48;
+        #[cfg(not(target_os = "linux"))]
+        const COL_TILE_F32: usize = 64;
         const MAX_TILE_VECTORS_F32: usize = COL_TILE_F32 / LANES_F32;
 
         if rows >= 512 && cols >= 512 {
@@ -2685,6 +2937,16 @@ mod neon {
     pub unsafe fn reduce_axis0_columns_f64(data: &[f64], rows: usize, cols: usize) -> Vec<f64> {
         debug_assert_eq!(rows.saturating_mul(cols), data.len());
         let debug = std::env::var("RAPTORS_DEBUG_AXIS0").is_ok();
+        if debug {
+            super::log_neon_axis0_alignment(
+                "neon::reduce_axis0_columns_f64",
+                rows,
+                cols,
+                data.as_ptr() as *const u8,
+                std::mem::size_of::<f64>(),
+                2,
+            );
+        }
         
         // TODO: Code-generated kernels are currently disabled due to performance regressions
         // Need to investigate and fix the tiled accumulation logic
@@ -2718,7 +2980,12 @@ mod neon {
         if rows == 512 && cols == 512 {
             if debug {
                 eprintln!(
-                    "[DEBUG] neon::reduce_axis0_columns_f64: Using pure columnar path for 512x512"
+                    "[DEBUG] neon::reduce_axis0_columns_f64: Using pure columnar path for 512x512, data alignment: {:p}, out alignment: {:p}",
+                    base_ptr, out_ptr
+                );
+                eprintln!(
+                    "[DEBUG] neon::reduce_axis0_columns_f64: data alignment check: {} (expected 16), out alignment check: {} (expected 16)",
+                    (base_ptr as usize) % 16, (out_ptr as usize) % 16
                 );
             }
             
@@ -2735,15 +3002,10 @@ mod neon {
                     let vec = vld1q_f64(ptr);
                     acc = vaddq_f64(acc, vec);
                     
-                    // Prefetch next row
-                    #[cfg(target_arch = "aarch64")]
+                    // Prefetch next row (size-aware: 512x512 uses L1)
                     if row + 1 < rows {
                         let next_ptr = base_ptr.add((row + 1) * stride + col);
-                        core::arch::asm!(
-                            "prfm pldl1keep, [{addr}]",
-                            addr = in(reg) next_ptr,
-                            options(readonly, nostack)
-                        );
+                        emit_prefetch_load_sized(next_ptr, rows, cols);
                     }
                     
                     row += 1;
@@ -2751,14 +3013,9 @@ mod neon {
                 
                 // Write result once per column with prefetch hint for store
                 // Prefetch store location to prepare write buffer
-                #[cfg(target_arch = "aarch64")]
-                {
-                    let out_addr = out_ptr.add(col);
-                    core::arch::asm!(
-                        "prfm pstl1keep, [{addr}]",
-                        addr = in(reg) out_addr,
-                        options(nostack)
-                    );
+                // Note: Only disable LOAD prefetch for 1024x1024, keep STORE prefetch
+                if should_prefetch() {
+                    emit_prefetch_store(out_ptr.add(col));
                 }
                 vst1q_f64(out_ptr.add(col), acc);
                 col += LANES_F64;
@@ -2783,7 +3040,12 @@ mod neon {
         if rows == 1024 && cols == 1024 {
             if debug {
                 eprintln!(
-                    "[DEBUG] neon::reduce_axis0_columns_f64: Using pure columnar path for 1024x1024"
+                    "[DEBUG] neon::reduce_axis0_columns_f64: Using pure columnar path for 1024x1024, data alignment: {:p}, out alignment: {:p}",
+                    base_ptr, out_ptr
+                );
+                eprintln!(
+                    "[DEBUG] neon::reduce_axis0_columns_f64: data alignment check: {} (expected 16), out alignment check: {} (expected 16)",
+                    (base_ptr as usize) % 16, (out_ptr as usize) % 16
                 );
             }
             
@@ -2800,30 +3062,20 @@ mod neon {
                     let vec = vld1q_f64(ptr);
                     acc = vaddq_f64(acc, vec);
                     
-                    // Prefetch next row
-                    #[cfg(target_arch = "aarch64")]
+                    // Prefetch next row (size-aware: 1024x1024 disables prefetch - 8.2% faster)
                     if row + 1 < rows {
                         let next_ptr = base_ptr.add((row + 1) * stride + col);
-                        core::arch::asm!(
-                            "prfm pldl1keep, [{addr}]",
-                            addr = in(reg) next_ptr,
-                            options(readonly, nostack)
-                        );
+                        emit_prefetch_load_sized(next_ptr, rows, cols);
                     }
                     
                     row += 1;
                 }
                 
                 // Write result once per column with prefetch hint for store
-                // Prefetch store location to prepare write buffer
-                #[cfg(target_arch = "aarch64")]
-                {
-                    let out_addr = out_ptr.add(col);
-                    core::arch::asm!(
-                        "prfm pstl1keep, [{addr}]",
-                        addr = in(reg) out_addr,
-                        options(nostack)
-                    );
+                // Note: Only disable LOAD prefetch for 1024x1024, keep STORE prefetch
+                // (Store prefetch may still help even if load prefetch doesn't)
+                if should_prefetch() {
+                    emit_prefetch_store(out_ptr.add(col));
                 }
                 vst1q_f64(out_ptr.add(col), acc);
                 col += LANES_F64;
@@ -2880,65 +3132,28 @@ mod neon {
                     acc2 = vaddq_f64(acc2, vec2);
                     acc3 = vaddq_f64(acc3, vec3);
                     
-                    // Prefetch next row for all columns
-                    #[cfg(target_arch = "aarch64")]
+                    // Prefetch next row for all columns (size-aware: 2048x2048 uses L3 - 2.6% faster)
                     if row + 1 < rows {
                         let next_ptr0 = base_ptr.add((row + 1) * stride + col);
                         let next_ptr1 = base_ptr.add((row + 1) * stride + col + LANES_F64);
                         let next_ptr2 = base_ptr.add((row + 1) * stride + col + LANES_F64 * 2);
                         let next_ptr3 = base_ptr.add((row + 1) * stride + col + LANES_F64 * 3);
-                        core::arch::asm!(
-                            "prfm pldl1keep, [{addr}]",
-                            addr = in(reg) next_ptr0,
-                            options(readonly, nostack)
-                        );
-                        core::arch::asm!(
-                            "prfm pldl1keep, [{addr}]",
-                            addr = in(reg) next_ptr1,
-                            options(readonly, nostack)
-                        );
-                        core::arch::asm!(
-                            "prfm pldl1keep, [{addr}]",
-                            addr = in(reg) next_ptr2,
-                            options(readonly, nostack)
-                        );
-                        core::arch::asm!(
-                            "prfm pldl1keep, [{addr}]",
-                            addr = in(reg) next_ptr3,
-                            options(readonly, nostack)
-                        );
+                        emit_prefetch_load_sized(next_ptr0, rows, cols);
+                        emit_prefetch_load_sized(next_ptr1, rows, cols);
+                        emit_prefetch_load_sized(next_ptr2, rows, cols);
+                        emit_prefetch_load_sized(next_ptr3, rows, cols);
                     }
                     
                     row += 1;
                 }
                 
                 // Write results once per column with prefetch hint for store
-                #[cfg(target_arch = "aarch64")]
-                {
-                    let out_addr0 = out_ptr.add(col);
-                    let out_addr1 = out_ptr.add(col + LANES_F64);
-                    let out_addr2 = out_ptr.add(col + LANES_F64 * 2);
-                    let out_addr3 = out_ptr.add(col + LANES_F64 * 3);
-                    core::arch::asm!(
-                        "prfm pstl1keep, [{addr}]",
-                        addr = in(reg) out_addr0,
-                        options(nostack)
-                    );
-                    core::arch::asm!(
-                        "prfm pstl1keep, [{addr}]",
-                        addr = in(reg) out_addr1,
-                        options(nostack)
-                    );
-                    core::arch::asm!(
-                        "prfm pstl1keep, [{addr}]",
-                        addr = in(reg) out_addr2,
-                        options(nostack)
-                    );
-                    core::arch::asm!(
-                        "prfm pstl1keep, [{addr}]",
-                        addr = in(reg) out_addr3,
-                        options(nostack)
-                    );
+                // Note: Only disable LOAD prefetch for 1024x1024, keep STORE prefetch
+                if should_prefetch() {
+                    emit_prefetch_store(out_ptr.add(col));
+                    emit_prefetch_store(out_ptr.add(col + LANES_F64));
+                    emit_prefetch_store(out_ptr.add(col + LANES_F64 * 2));
+                    emit_prefetch_store(out_ptr.add(col + LANES_F64 * 3));
                 }
                 vst1q_f64(out_ptr.add(col), acc0);
                 vst1q_f64(out_ptr.add(col + LANES_F64), acc1);
@@ -2961,40 +3176,18 @@ mod neon {
                     acc0 = vaddq_f64(acc0, vec0);
                     acc1 = vaddq_f64(acc1, vec1);
                     
-                    #[cfg(target_arch = "aarch64")]
                     if row + 1 < rows {
                         let next_ptr0 = base_ptr.add((row + 1) * stride + col);
                         let next_ptr1 = base_ptr.add((row + 1) * stride + col + LANES_F64);
-                        core::arch::asm!(
-                            "prfm pldl1keep, [{addr}]",
-                            addr = in(reg) next_ptr0,
-                            options(readonly, nostack)
-                        );
-                        core::arch::asm!(
-                            "prfm pldl1keep, [{addr}]",
-                            addr = in(reg) next_ptr1,
-                            options(readonly, nostack)
-                        );
+                        emit_prefetch_load(next_ptr0);
+                        emit_prefetch_load(next_ptr1);
                     }
                     
                     row += 1;
                 }
                 
-                #[cfg(target_arch = "aarch64")]
-                {
-                    let out_addr0 = out_ptr.add(col);
-                    let out_addr1 = out_ptr.add(col + LANES_F64);
-                    core::arch::asm!(
-                        "prfm pstl1keep, [{addr}]",
-                        addr = in(reg) out_addr0,
-                        options(nostack)
-                    );
-                    core::arch::asm!(
-                        "prfm pstl1keep, [{addr}]",
-                        addr = in(reg) out_addr1,
-                        options(nostack)
-                    );
-                }
+                emit_prefetch_store(out_ptr.add(col));
+                emit_prefetch_store(out_ptr.add(col + LANES_F64));
                 vst1q_f64(out_ptr.add(col), acc0);
                 vst1q_f64(out_ptr.add(col + LANES_F64), acc1);
                 col += LANES_F64 * 2;
@@ -3013,29 +3206,16 @@ mod neon {
                     acc = vaddq_f64(acc, vec);
                     
                     // Prefetch next row
-                    #[cfg(target_arch = "aarch64")]
                     if row + 1 < rows {
                         let next_ptr = base_ptr.add((row + 1) * stride + col);
-                        core::arch::asm!(
-                            "prfm pldl1keep, [{addr}]",
-                            addr = in(reg) next_ptr,
-                            options(readonly, nostack)
-                        );
+                        emit_prefetch_load(next_ptr);
                     }
                     
                     row += 1;
                 }
                 
                 // Write result once per column with prefetch hint for store
-                #[cfg(target_arch = "aarch64")]
-                {
-                    let out_addr = out_ptr.add(col);
-                    core::arch::asm!(
-                        "prfm pstl1keep, [{addr}]",
-                        addr = in(reg) out_addr,
-                        options(nostack)
-                    );
-                }
+                emit_prefetch_store(out_ptr.add(col));
                 vst1q_f64(out_ptr.add(col), acc);
                 col += LANES_F64;
             }
@@ -3078,6 +3258,17 @@ mod neon {
                     let tail = width - tail_start;
                     let mut vec_acc = [vdupq_n_f64(0.0); MAX_TILE_VECTORS_2048_F64];
                     let mut tail_acc = [0.0f64; LANES_F64];
+                    
+                    // Linux-specific: Prefetch tile data with L2 cache hint
+                    #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+                    {
+                        let prefetch_ptr = base_ptr.add(row_start * stride + col);
+                        core::arch::asm!(
+                            "prfm pldl2keep, [{addr}]",
+                            addr = in(reg) prefetch_ptr,
+                            options(readonly, nostack)
+                        );
+                    }
 
                     // Aggressive prefetching for specialized path
                     #[cfg(target_arch = "aarch64")]
@@ -3193,16 +3384,33 @@ mod neon {
             return out;
         }
 
-        // For matrices >=512², use optimized tiled approach for better cache locality
-        // This processes data in blocks to keep working set in L1/L2 cache
-        // Optimized tile sizes for ARM64: 32KB L1 cache, 64-byte cache lines
-        // Row tile of 128 rows * 64 cols * 8 bytes = 64KB (needs L2, but reasonable)
-        const ROW_TILE_F64: usize = 128; // Process 128 rows at a time (L1 cache friendly)
-        const COL_TILE_F64: usize = 64; // Process 64 columns at a time (fits in L1 cache ~16KB)
+        // For matrices >=512², use optimized tiled approach for better cache locality.
+        // Linux-on-virtualization benefits from slightly smaller tiles to keep the
+        // working set within the emulated L2 (falling back to macOS defaults otherwise).
+        #[cfg(target_os = "linux")]
+        const ROW_TILE_F64: usize = 96;
+        #[cfg(not(target_os = "linux"))]
+        const ROW_TILE_F64: usize = 128;
+        #[cfg(target_os = "linux")]
+        const COL_TILE_F64: usize = 48;
+        #[cfg(not(target_os = "linux"))]
+        const COL_TILE_F64: usize = 64;
         const MAX_TILE_VECTORS_F64: usize = COL_TILE_F64 / LANES_F64;
         const UNROLL_FACTOR_TILED_F64: usize = 4; // Unroll inner row loop 4x for better ILP
 
-        if rows >= 1536 && cols >= 1536 {
+        // Linux-specific: Use tiled path for smaller matrices (may be more cache-friendly in Docker)
+        #[cfg(target_os = "linux")]
+        let use_tiled = rows >= 1024 && cols >= 1024;
+        #[cfg(not(target_os = "linux"))]
+        let use_tiled = rows >= 1536 && cols >= 1536;
+        
+        if use_tiled {
+            if debug {
+                eprintln!(
+                    "[DEBUG] neon::reduce_axis0_columns_f64: using large tiled path (rows={}, cols={})",
+                    rows, cols
+                );
+            }
             // Tiled reduction for large matrices - more cache-friendly than columnar
             let mut row_start = 0usize;
             while row_start < rows {
